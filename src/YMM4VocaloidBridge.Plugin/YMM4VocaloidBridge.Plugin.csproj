@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <YMM4DirPath Condition="'$(YMM4DirPath)' == '' and Exists('$(MSBuildThisFileDirectory)..\..\..\runtime\YMM4-v4.54.0.1\YukkuriMovieMaker.Plugin.dll')">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\runtime\YMM4-v4.54.0.1'))</YMM4DirPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\YMM4VocaloidBridge.Core\YMM4VocaloidBridge.Core.csproj" />
+    <ProjectReference Include="..\YMM4VocaloidBridge.Automation\YMM4VocaloidBridge.Automation.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="YukkuriMovieMaker.Controls">
+      <HintPath>$(YMM4DirPath)\YukkuriMovieMaker.Controls.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="YukkuriMovieMaker.Plugin">
+      <HintPath>$(YMM4DirPath)\YukkuriMovieMaker.Plugin.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="EnsureYmm4References" BeforeTargets="ResolveReferences" Condition="!Exists('$(YMM4DirPath)\YukkuriMovieMaker.Plugin.dll')">
+    <Error Text="Set YMM4DirPath to a local YMM4 directory containing YukkuriMovieMaker.Plugin.dll." />
+  </Target>
+</Project>

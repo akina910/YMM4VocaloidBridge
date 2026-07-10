@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/YMM4VocaloidBridge.Automation/YMM4VocaloidBridge.Automation.csproj" />
+    <Project Path="src/YMM4VocaloidBridge.Cli/YMM4VocaloidBridge.Cli.csproj" />
+    <Project Path="src/YMM4VocaloidBridge.Core/YMM4VocaloidBridge.Core.csproj" />
+    <Project Path="src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj" />
+  </Folder>
+</Solution>
