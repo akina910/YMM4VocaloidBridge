@@ -1,6 +1,6 @@
 # Upstreams and License Strategy
 
-初期コミットには、下記プロジェクトのコードを取り込んでいません。実装時に利用する場合は、対象コミットを固定し、著作権表示とライセンス本文を保持します。
+下記プロジェクトは設計と公開APIの調査に利用しました。現在の実装へ上流ソースコードはコピーしていません。依存パッケージは`THIRD-PARTY-NOTICES.md`と`licenses/`に固定バージョンとライセンスを記録しています。
 
 ## Primary references
 
@@ -10,7 +10,16 @@
 | [InuInu2022/KuchiPaku](https://github.com/InuInu2022/KuchiPaku) | 母音口形、`.lab`、YMM4口パク処理の参考 | MIT | Coreロジックの再利用候補。変更点を明記する |
 | [routersys/YMM4-MIDI](https://github.com/routersys/YMM4-MIDI) | MIDI、歌詞・音素、YMM4音声プラグインの調査 | MIT | 必要性とビルド再現性を確認してから採用判断する |
 | [YukkuriMovieMaker4PluginSamples](https://github.com/manju-summoner/YukkuriMovieMaker4PluginSamples) | 現行YMM4プラグインAPIと.NET 10構成の参照 | リポジトリのライセンスを実装前に再確認 | ライセンスが不明確なコードはコピーしない |
-| [FlaUI/FlaUI](https://github.com/FlaUI/FlaUI) | Windows UI Automation候補 | MIT | Phase 0でVOCALOID6との互換性を評価する |
+| Windows UI Automation | VOCALOID6の公開UI操作 | Windows公開API | 外部UIライブラリを配布せずAutomation IDと標準ダイアログを利用する |
+
+## Runtime dependencies
+
+| Package | Version | License | Use |
+| --- | --- | --- | --- |
+| Lucene.Net.Analysis.Kuromoji | 4.8.0-beta00017 | Apache-2.0 | 日本語の形態素解析と読み |
+| Lucene.Net / Analysis.Common | 4.8.0-beta00017 | Apache-2.0 | Kuromojiランタイム |
+| J2N | 2.1.0 | BSD-3-Clause | Lucene.NET依存 |
+| Microsoft.Extensions.Configuration.Abstractions / Primitives | 8.0.0 | MIT | Lucene.NET依存 |
 
 ## Import procedure
 

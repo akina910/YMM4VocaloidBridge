@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.301
+
+      - name: Restore tests and public projects
+        shell: pwsh
+        run: |
+          dotnet restore tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj
+          dotnet restore src/YMM4VocaloidBridge.Cli/YMM4VocaloidBridge.Cli.csproj
+
+      - name: Build public projects
+        shell: pwsh
+        run: |
+          dotnet build src/YMM4VocaloidBridge.Core/YMM4VocaloidBridge.Core.csproj -c Release --no-restore
+          dotnet build src/YMM4VocaloidBridge.Automation/YMM4VocaloidBridge.Automation.csproj -c Release --no-restore
+          dotnet build src/YMM4VocaloidBridge.Cli/YMM4VocaloidBridge.Cli.csproj -c Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: dotnet test tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj -c Release --no-restore --logger trx
+
+      - name: Generate MIDI and LAB smoke artifacts
+        shell: pwsh
+        run: >-
+          dotnet run --project src/YMM4VocaloidBridge.Cli/YMM4VocaloidBridge.Cli.csproj
+          -c Release --no-build -- generate --text "今日は初音ミクです。" --out-dir artifacts/smoke
+
+      - name: Dependency audit
+        shell: pwsh
+        run: |
+          dotnet list src/YMM4VocaloidBridge.Core/YMM4VocaloidBridge.Core.csproj package --vulnerable --include-transitive
+          dotnet list src/YMM4VocaloidBridge.Core/YMM4VocaloidBridge.Core.csproj package --deprecated --include-transitive
+
+      - name: Distribution boundary and notices
+        shell: pwsh
+        run: |
+          $required = @(
+            "THIRD-PARTY-NOTICES.md",
+            "licenses/Lucene-LICENSE.txt",
+            "licenses/Lucene-NOTICE.txt",
+            "licenses/J2N-LICENSE.txt",
+            "licenses/Microsoft.Extensions-LICENSE.txt"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing required notice: $path" }
+          }
+          $forbidden = Get-ChildItem -Recurse -File | Where-Object {
+            $_.Extension -in ".wav", ".vpr", ".vsqx" -or
+            $_.Name -match "YukkuriMovieMaker\.Plugin\.dll|VOCALOID6\.exe"
+          }
+          if ($forbidden) { throw "Forbidden product or generated files found: $($forbidden.FullName -join ', ')" }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: "**/TestResults/*.trx"
+          if-no-files-found: ignore

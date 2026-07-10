@@ -1,10 +1,10 @@
 # Implementation Plan
 
-Status: **Planning only**
+Status: **Implementation active; M0 exit gate passed**
 
 Last updated: 2026-07-10
 
-この文書が実装開始前の基準計画です。Phase 0のゲートを満たし、Issue上で採用方式を確定するまで機能コードを追加しません。
+この文書は実装の基準計画です。Phase 0のゲートは2026-07-10に実機検証で通過しました。証跡と採用判断は[M0 Feasibility Evidence](M0_FEASIBILITY_EVIDENCE.md)に記録しています。
 
 ## 1. Product Goal
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **Proposed**
+Status: **Accepted for public beta implementation**
 
 ## Principles
 

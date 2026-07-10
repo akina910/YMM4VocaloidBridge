@@ -1,0 +1,68 @@
+name: Build YMME package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      YMM4_VERSION: 4.54.0.1
+      YMM4_URL: https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.54.0.1/YukkuriMovieMaker_v4.54.0.1.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.301
+
+      - uses: actions/cache@v4
+        id: ymm4-cache
+        with:
+          path: .ymm4
+          key: ymm4-${{ runner.os }}-${{ env.YMM4_VERSION }}
+
+      - name: Download official YMM4 compatibility target
+        if: steps.ymm4-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path .ymm4 -Force | Out-Null
+          Invoke-WebRequest $env:YMM4_URL -OutFile ymm4.zip
+          Expand-Archive ymm4.zip -DestinationPath .ymm4
+
+      - name: Build and test plugin against YMM4
+        shell: pwsh
+        run: |
+          dotnet build src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj `
+            -c Release "-p:YMM4DirPath=$((Resolve-Path .ymm4).Path)"
+          dotnet test tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj -c Release
+
+      - name: Create package
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.1" }
+          ./tools/build-package.ps1 -Version $version -Ymm4DirPath (Resolve-Path .ymm4).Path
+
+      - name: Verify package boundary
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem artifacts/*.ymme | Select-Object -First 1
+          Copy-Item $package.FullName package.zip
+          Expand-Archive package.zip -DestinationPath package-check
+          $forbidden = Get-ChildItem package-check -Recurse -File | Where-Object {
+            $_.Name -match "YukkuriMovieMaker\.|VOCALOID|HATSUNE_MIKU" -and
+            $_.Name -notmatch "YMM4VocaloidBridge"
+          }
+          if ($forbidden) { throw "Package includes a forbidden product file: $($forbidden.FullName -join ', ')" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YMM4VocaloidBridge-ymme
+          path: artifacts/*.ymme
+          if-no-files-found: error
