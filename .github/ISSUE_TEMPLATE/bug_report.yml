@@ -1,0 +1,52 @@
+name: Bug report
+description: 再現可能な不具合を報告する
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        認証情報、シリアル番号、個人パスを投稿しないでください。脆弱性はSECURITY.mdに従って非公開で報告してください。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 期待した動作と実際の動作を記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: バージョン
+      description: Windows、YMM4、VOCALOID6、プラグインの各バージョン
+    validations:
+      required: true
+  - type: input
+    id: ui
+    attributes:
+      label: UI環境
+      description: UI言語、表示倍率、モニター数
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 診断情報
+      description: 秘密情報を削除したログやスクリーンショット
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 確認
+      options:
+        - label: 最新のIssueに同じ報告がないことを確認した
+          required: true
+        - label: ログと画像から認証情報・個人情報を削除した
+          required: true

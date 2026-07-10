@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/akina910/YMM4VocaloidBridge/discussions
+    about: 利用方法や設計相談はDiscussionsへ投稿してください。

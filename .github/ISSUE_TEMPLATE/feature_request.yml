@@ -1,0 +1,47 @@
+name: Feature request
+description: 利用者の問題と改善案を提案する
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい問題
+      description: 機能名ではなく、現在困っている利用場面を記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案
+      description: 望ましい利用体験と受け入れ条件を記載してください。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 対象領域
+      options:
+        - YMM4 integration
+        - VOCALOID6 automation
+        - Text and prosody
+        - Lip sync
+        - Packaging and diagnostics
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案
+      description: 試した方法や、採用しなかった案
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: 境界
+      options:
+        - label: ボイスバンクやキャラクター素材の配布を必要としない提案である
+          required: true
+        - label: ライセンス認証や製品保護の回避を必要としない提案である
+          required: true
