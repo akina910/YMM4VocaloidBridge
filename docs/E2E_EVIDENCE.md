@@ -45,6 +45,12 @@ FFmpeg `volumedetect` confirmed that all 20 outputs were non-silent. Generated W
 
 Thirty short Japanese dialogues are covered by a deterministic unit test. Each sequence starts and ends with a closed mouth, contains at least one vowel mouth shape, and produces identical notes and mouth frames on repeated runs. The YMM4 adapter maps these frames to public `YukkuriMovieMaker.Commons.LipSyncFrame` values.
 
+## YMM4 plugin contract
+
+The Release plugin was loaded in-process with the official YMM4 4.54.0.1 assemblies. The contract smoke test passed for plugin discovery metadata, the single HATSUNE MIKU V6 speaker, voice parameter creation, Japanese reading conversion, native YMM4 lip-sync frames, and pronounce cloning. The package doctor also reported YMM4 4.54.0.1, VOCALOID6 6.12.0.1, and HATSUNE MIKU V6 6.12.0 as ready.
+
+This contract test does not open the downloaded YMM4 executable. Final confirmation that the voice appears in YMM4's in-app plugin list remains a first-launch verification step.
+
 ## Failure and recovery
 
 - An unavailable or renamed UI element raises `VocaloidAutomationException` with the failed stage information.

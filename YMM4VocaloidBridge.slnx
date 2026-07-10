@@ -6,6 +6,7 @@
     <Project Path="src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/YMM4VocaloidBridge.PluginSmoke/YMM4VocaloidBridge.PluginSmoke.csproj" />
     <Project Path="tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj" />
   </Folder>
 </Solution>

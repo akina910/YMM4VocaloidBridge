@@ -42,6 +42,10 @@ jobs:
           dotnet build src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj `
             -c Release "-p:YMM4DirPath=$((Resolve-Path .ymm4).Path)"
           dotnet test tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj -c Release
+          dotnet run --project tests/YMM4VocaloidBridge.PluginSmoke/YMM4VocaloidBridge.PluginSmoke.csproj `
+            -c Release -- `
+            (Resolve-Path src/YMM4VocaloidBridge.Plugin/bin/Release/net10.0-windows10.0.19041.0).Path `
+            (Resolve-Path .ymm4).Path
 
       - name: Create package
         shell: pwsh
