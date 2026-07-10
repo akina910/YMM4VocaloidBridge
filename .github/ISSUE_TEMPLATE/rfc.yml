@@ -1,0 +1,40 @@
+name: RFC / technical spike
+description: 実装前の調査、方式比較、設計判断を提案する
+title: "[RFC]: "
+labels: ["rfc", "help wanted"]
+body:
+  - type: input
+    id: phase
+    attributes:
+      label: Phase
+      placeholder: Phase 0
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: 決めること
+      description: このRFCで答える具体的な質問
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 必要な証拠
+      description: 再現手順、ログ、互換性表、ライセンス資料など
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: 比較する選択肢
+      description: 各案の利点、欠点、失敗時の代替案
+    validations:
+      required: true
+  - type: textarea
+    id: exit
+    attributes:
+      label: 完了条件
+      description: どの状態になれば設計判断できるか
+    validations:
+      required: true

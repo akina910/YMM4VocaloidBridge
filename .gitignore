@@ -1,0 +1,40 @@
+# Build output
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.cache
+
+# IDEs
+.vs/
+.idea/
+.vscode/*.user.json
+
+# YMM4 local references and packages
+local/
+vendor/
+*.ymme
+*.ymmp
+
+# Generated media and proprietary project data
+*.wav
+*.mp3
+*.vpr
+*.vsqx
+*.mid
+*.midi
+*.lab
+
+# Logs and local settings
+logs/
+*.log
+appsettings.local.json
+.env
+.env.*
+!.env.example
+
+# OS files
+Thumbs.db
+.DS_Store
