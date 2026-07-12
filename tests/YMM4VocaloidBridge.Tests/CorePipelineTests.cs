@@ -14,6 +14,12 @@ public sealed class CorePipelineTests : IDisposable
     private readonly string temporaryDirectory = Path.Combine(Path.GetTempPath(), "YMM4VocaloidBridgeTests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Default_voicebank_is_miku_v6_original()
+    {
+        Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", new BridgeOptions().VoicebankName);
+    }
+
+    [Fact]
     public void Reading_preserves_particles_and_punctuation()
     {
         var result = new JapaneseReadingService().Convert("今日は初音ミクです。ありがとう！");
@@ -91,6 +97,23 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal((ushort)1, result.Channels);
         Assert.Equal(44_100, result.SampleRate);
         Assert.Equal(TimeSpan.FromMilliseconds(100), result.Duration);
+    }
+
+    [Fact]
+    public async Task Wave_output_renders_as_wav_then_publishes_to_requested_temporary_path()
+    {
+        var requested = Path.Combine(temporaryDirectory, "voice", "output.rje.tmp");
+        var work = Path.Combine(temporaryDirectory, "work");
+        var output = SynthesisWaveOutput.Create(requested, work);
+
+        Assert.Equal(".wav", Path.GetExtension(output.RenderPath), StringComparer.OrdinalIgnoreCase);
+        Assert.NotEqual(output.RequestedPath, output.RenderPath);
+
+        WritePcmWave(output.RenderPath, sampleRate: 44_100, sampleCount: 441);
+        await output.PublishAsync();
+
+        Assert.Equal(File.ReadAllBytes(output.RenderPath), File.ReadAllBytes(output.RequestedPath));
+        _ = new WaveFileValidator().Validate(output.RequestedPath);
     }
 
     [Fact]

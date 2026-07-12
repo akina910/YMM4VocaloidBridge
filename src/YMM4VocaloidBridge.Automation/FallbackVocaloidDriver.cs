@@ -1,6 +1,9 @@
 namespace YMM4VocaloidBridge.Automation;
 
-public sealed class FallbackVocaloidDriver(IVocaloidDriver automaticDriver, IVocaloidDriver assistedDriver) : IVocaloidDriver
+public sealed class FallbackVocaloidDriver(
+    IVocaloidDriver automaticDriver,
+    IVocaloidDriver assistedDriver,
+    Func<VocaloidAutomationException, Task>? automaticFailureObserver = null) : IVocaloidDriver
 {
     public async Task<VocaloidRenderResult> RenderAsync(
         VocaloidRenderRequest request,
@@ -12,6 +15,11 @@ public sealed class FallbackVocaloidDriver(IVocaloidDriver automaticDriver, IVoc
         }
         catch (VocaloidAutomationException exception)
         {
+            if (automaticFailureObserver is not null)
+            {
+                await automaticFailureObserver(exception).ConfigureAwait(false);
+            }
+
             try
             {
                 var fallback = await assistedDriver.RenderAsync(request, cancellationToken).ConfigureAwait(false);

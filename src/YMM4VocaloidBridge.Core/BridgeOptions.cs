@@ -10,6 +10,8 @@ public sealed record BridgeOptions
 {
     public const int TicksPerQuarterNote = 480;
 
+    public const string DefaultVoicebankName = "HATSUNE_MIKU_V6_ORIGINAL";
+
     public int TempoBpm { get; init; } = 120;
 
     public int BaseNote { get; init; } = 60;
@@ -26,7 +28,7 @@ public sealed record BridgeOptions
 
     public int TimeoutSeconds { get; init; } = 300;
 
-    public string VoicebankName { get; init; } = "HATSUNE_MIKU_V6_SOFT";
+    public string VoicebankName { get; init; } = DefaultVoicebankName;
 
     public VocaloidDriverMode DriverMode { get; init; } = VocaloidDriverMode.Assisted;
 

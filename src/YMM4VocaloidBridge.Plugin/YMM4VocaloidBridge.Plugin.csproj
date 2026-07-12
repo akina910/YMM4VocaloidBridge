@@ -10,6 +10,10 @@
     <ProjectReference Include="..\YMM4VocaloidBridge.Automation\YMM4VocaloidBridge.Automation.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(YMM4DirPath)\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="YukkuriMovieMaker.Controls">
       <HintPath>$(YMM4DirPath)\YukkuriMovieMaker.Controls.dll</HintPath>
       <Private>false</Private>

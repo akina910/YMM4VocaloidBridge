@@ -23,6 +23,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         ArgumentNullException.ThrowIfNull(request);
         await AutomationSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         var events = new List<string>();
+        AutomationElement? soloButton = null;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(request.OutputWavePath))!);
@@ -32,7 +33,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             }
 
             await Task.Run(
-                () => RunUiWorkflow(request, events, cancellationToken),
+                () => RunUiWorkflow(request, events, cancellationToken, value => soloButton = value),
                 cancellationToken).ConfigureAwait(false);
             await fileWaiter.WaitForWaveAsync(
                 request.OutputWavePath,
@@ -49,51 +50,110 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         {
             throw;
         }
-        catch (VocaloidAutomationException)
+        catch (VocaloidAutomationException exception)
         {
-            throw;
+            throw CreateStageException(exception, events);
         }
         catch (Exception exception)
         {
-            throw new VocaloidAutomationException(
-                $"VOCALOID6 UI automation failed ({exception.GetType().Name}: {exception.Message}). "
-                    + "Assisted mode can continue with the generated MIDI.",
-                exception);
+            throw CreateStageException(exception, events);
         }
         finally
         {
+            if (soloButton is not null)
+            {
+                events.Add("stage:restore-solo");
+                try
+                {
+                    await Task.Run(() => RestoreSoloWhenAvailable(soloButton, events), CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    events.Add("solo-restore-failed:" + exception.GetType().Name);
+                }
+            }
+
             AutomationSemaphore.Release();
         }
+    }
+
+    private static VocaloidAutomationException CreateStageException(
+        Exception exception,
+        IReadOnlyCollection<string> events)
+    {
+        var stage = events.LastOrDefault(x => x.StartsWith("stage:", StringComparison.Ordinal))?["stage:".Length..]
+            ?? "unknown";
+        return new VocaloidAutomationException(
+            $"VOCALOID6 UI automation failed at '{stage}' "
+                + $"({exception.GetType().Name}: {exception.Message}). "
+                + "Assisted mode can continue with the generated MIDI.",
+            exception);
     }
 
     private static void RunUiWorkflow(
         VocaloidRenderRequest request,
         ICollection<string> events,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<AutomationElement> soloButtonReady)
     {
+        events.Add("stage:attach-editor");
         var process = AttachOrLaunch(request.Installation.EditorPath);
+        events.Add("stage:dismiss-stale-dialogs");
         DismissStaleFileDialogs(process.Id);
+        events.Add("stage:wait-for-editor");
         var mainWindow = WaitUntil(
-            () => FindProcessWindow(process.Id, Id.HomeWindow, Id.MainWindow),
+            () =>
+            {
+                DismissUpdatePrompt(process.Id);
+                return FindProcessWindow(process.Id, Id.HomeWindow, Id.MainWindow);
+            },
             TimeSpan.FromSeconds(30),
             cancellationToken,
             "VOCALOID6 main window");
         events.Add("editor-ready");
 
+        events.Add("stage:ensure-project");
         EnsureProjectAndVoicebank(mainWindow, request.Options.VoicebankName, cancellationToken);
         events.Add("voicebank-selected");
+        events.Add("stage:import-midi");
         ImportMidi(mainWindow, request.Artifacts.MidiPath, request.Options.VoicebankName, cancellationToken);
         events.Add("midi-imported");
+        events.Add("stage:enable-solo");
         var soloButton = EnableSoloForLastTrack(mainWindow);
-        try
+        soloButtonReady(soloButton);
+        events.Add("stage:export-wave");
+        ExportWave(mainWindow, request.OutputWavePath, events, cancellationToken);
+        events.Add("mixdown-requested");
+    }
+
+    private static void RestoreSoloWhenAvailable(AutomationElement soloButton, ICollection<string> events)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
         {
-            ExportWave(mainWindow, request.OutputWavePath, cancellationToken);
-            events.Add("mixdown-requested");
+            try
+            {
+                if (soloButton.Current.IsEnabled)
+                {
+                    SetToggle(soloButton, false);
+                    events.Add("solo-restored");
+                    return;
+                }
+            }
+            catch (ElementNotEnabledException)
+            {
+            }
+            catch (ElementNotAvailableException)
+            {
+                events.Add("solo-restore-element-unavailable");
+                return;
+            }
+
+            Thread.Sleep(250);
         }
-        finally
-        {
-            SetToggle(soloButton, false);
-        }
+
+        events.Add("solo-restore-timed-out");
     }
 
     private static void DismissStaleFileDialogs(int processId)
@@ -122,6 +182,26 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         }
     }
 
+    private static void DismissUpdatePrompt(int processId)
+    {
+        var declineButton = FindProcessElementByAutomationId(processId, "donotUpdateButton");
+        if (declineButton is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Invoke(declineButton);
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (ElementNotEnabledException)
+        {
+        }
+    }
+
     private static Process AttachOrLaunch(string editorPath)
     {
         var process = Process.GetProcessesByName("VOCALOID6").FirstOrDefault();
@@ -130,8 +210,45 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             return process;
         }
 
-        return Process.Start(new ProcessStartInfo(editorPath) { UseShellExecute = true })
+        var startInfo = new ProcessStartInfo(editorPath)
+        {
+            UseShellExecute = false,
+            WorkingDirectory = Path.GetDirectoryName(editorPath)!,
+        };
+        var systemDotnetRoot = FindSystemDotnetRoot(requiredMajorVersion: 8);
+        if (systemDotnetRoot is not null)
+        {
+            startInfo.Environment["DOTNET_ROOT"] = systemDotnetRoot;
+            startInfo.Environment["DOTNET_ROOT_X64"] = systemDotnetRoot;
+            startInfo.Environment.Remove("DOTNET_HOST_PATH");
+        }
+
+        return Process.Start(startInfo)
             ?? throw new VocaloidAutomationException("VOCALOID6 Editor could not be started.");
+    }
+
+    private static string? FindSystemDotnetRoot(int requiredMajorVersion)
+    {
+        var dotnetRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "dotnet");
+        return HasRuntime(dotnetRoot, "Microsoft.NETCore.App", requiredMajorVersion)
+            && HasRuntime(dotnetRoot, "Microsoft.WindowsDesktop.App", requiredMajorVersion)
+                ? dotnetRoot
+                : null;
+    }
+
+    private static bool HasRuntime(string dotnetRoot, string frameworkName, int requiredMajorVersion)
+    {
+        var sharedDirectory = Path.Combine(dotnetRoot, "shared", frameworkName);
+        if (!Directory.Exists(sharedDirectory))
+        {
+            return false;
+        }
+
+        return Directory.EnumerateDirectories(sharedDirectory)
+            .Select(Path.GetFileName)
+            .Any(name => Version.TryParse(name, out var version) && version.Major == requiredMajorVersion);
     }
 
     private static AutomationElement? FindProcessWindow(int processId, params string[] automationIds)
@@ -148,24 +265,30 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         string voicebankName,
         CancellationToken cancellationToken)
     {
+        AutomationElement? addTrack = null;
         if (mainWindow.Current.AutomationId == Id.MainWindow)
         {
             EnsureDedicatedBridgeProject(mainWindow);
-            return;
+            addTrack = FindProcessElementByAutomationId(mainWindow.Current.ProcessId, Id.AddTrackDialog);
+            if (addTrack is null)
+            {
+                return;
+            }
         }
 
         if (mainWindow.Current.AutomationId == Id.HomeWindow)
         {
             var newProject = FindByNames(mainWindow, ControlType.Button, "NEW PROJECT", "新規プロジェクト", "New Project")
+                ?? FindButtonByDescendantText(mainWindow, "NEW PROJECT", "新規プロジェクト", "New Project")
                 ?? throw new VocaloidAutomationException("The NEW PROJECT button was not found.");
             Invoke(newProject);
         }
 
-        var addTrack = WaitUntil(
-            () => FindProcessElementByAutomationId(mainWindow.Current.ProcessId, Id.AddTrackDialog),
-            TimeSpan.FromSeconds(15),
-            cancellationToken,
-            "Add Track dialog");
+        addTrack ??= WaitUntil(
+                () => FindProcessElementByAutomationId(mainWindow.Current.ProcessId, Id.AddTrackDialog),
+                TimeSpan.FromSeconds(15),
+                cancellationToken,
+                "Add Track dialog");
         var aiTrack = FindDescendantByAutomationId(addTrack, Id.AiTrackButton)
             ?? throw new VocaloidAutomationException("The VOCALOID:AI track button was not found.");
         Invoke(aiTrack);
@@ -227,21 +350,28 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
     private static void ExportWave(
         AutomationElement mainWindow,
         string outputPath,
+        ICollection<string> events,
         CancellationToken cancellationToken)
     {
         var processId = mainWindow.Current.ProcessId;
+        events.Add("stage:export-open-file-menu");
         var fileMenu = FindByNames(mainWindow, ControlType.MenuItem, "ファイル", "File")
             ?? throw new VocaloidAutomationException("The File menu was not found before mixdown.");
         Invoke(fileMenu);
+        events.Add("stage:export-find-mixdown");
         var mixdown = WaitUntil(
             () => FindAllForProcess(processId, ControlType.MenuItem)
-                .FirstOrDefault(x => x.Current.Name.Contains("Mixdown", StringComparison.OrdinalIgnoreCase)
-                    || x.Current.Name.Contains("ミックスダウン", StringComparison.OrdinalIgnoreCase)),
-            TimeSpan.FromSeconds(5),
+                .FirstOrDefault(x => (x.Current.Name.Contains("Mixdown", StringComparison.OrdinalIgnoreCase)
+                        || x.Current.Name.Contains("ミックスダウン", StringComparison.OrdinalIgnoreCase))
+                    && x.Current.IsEnabled
+                    && !x.Current.IsOffscreen),
+            TimeSpan.FromSeconds(60),
             cancellationToken,
-            "Audio Mixdown menu item");
+            "enabled Audio Mixdown menu item");
+        events.Add("stage:export-invoke-mixdown");
         Invoke(mixdown);
 
+        events.Add("stage:export-mixdown-settings");
         var mixdownSettings = FindTransientWindow(mainWindow, cancellationToken, TimeSpan.FromSeconds(5));
         if (mixdownSettings is not null)
         {
@@ -249,8 +379,10 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             InvokeButton(mixdownSettings, "OK");
         }
 
+        events.Add("stage:export-save-dialog");
         CompleteFileDialog(processId, outputPath, isSaveDialog: true, cancellationToken);
 
+        events.Add("stage:export-overwrite-confirmation");
         var overwrite = FindTransientWindow(mainWindow, cancellationToken, TimeSpan.FromSeconds(2));
         if (overwrite is not null && overwrite.Current.Name.Contains("確認", StringComparison.OrdinalIgnoreCase))
         {
@@ -410,6 +542,26 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         return matches.FirstOrDefault(x => !x.Current.IsOffscreen) ?? matches.FirstOrDefault();
     }
 
+    private static AutomationElement? FindButtonByDescendantText(
+        AutomationElement root,
+        params string[] names)
+    {
+        var label = FindAllDescendants(root, ControlType.Text)
+            .FirstOrDefault(x => names.Any(name =>
+                string.Equals(x.Current.Name, name, StringComparison.OrdinalIgnoreCase)));
+        var current = label;
+        for (var depth = 0; current is not null && depth < 5; depth++)
+        {
+            current = TreeWalker.ControlViewWalker.GetParent(current);
+            if (current?.Current.ControlType == ControlType.Button)
+            {
+                return current;
+            }
+        }
+
+        return null;
+    }
+
     private static IEnumerable<AutomationElement> FindAllDescendants(AutomationElement root, ControlType controlType)
     {
         var condition = new PropertyCondition(AutomationElement.ControlTypeProperty, controlType);
@@ -482,9 +634,9 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         }
 
         var item = FindAllDescendants(comboBox, ControlType.ListItem)
-            .FirstOrDefault(x => string.Equals(x.Current.Name, itemName, StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault(x => MatchesListItemName(x, itemName))
             ?? FindAllForProcess(comboBox.Current.ProcessId, ControlType.ListItem)
-                .FirstOrDefault(x => x.Current.Name.Contains(itemName, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(x => MatchesListItemName(x, itemName));
         if (item is null)
         {
             if (required)
@@ -499,6 +651,20 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         if (comboBox.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out expandPattern))
         {
             ((ExpandCollapsePattern)expandPattern).Collapse();
+        }
+    }
+
+    private static bool MatchesListItemName(AutomationElement item, string itemName)
+    {
+        try
+        {
+            return item.Current.Name.Contains(itemName, StringComparison.OrdinalIgnoreCase)
+                || FindAllDescendants(item, ControlType.Text)
+                    .Any(x => x.Current.Name.Contains(itemName, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
         }
     }
 

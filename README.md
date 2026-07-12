@@ -27,8 +27,8 @@ YMM4から、ユーザーが正規に所有・インストールしているVOCA
 
 1. [インストールと初回実行](docs/INSTALLATION.md)に従って`.ymme`を導入する
 2. 同梱CLIの`doctor --ui`でYMM4、VOCALOID6、初音ミク V6を確認する
-3. YMM4の声質で`VOCALOID6 Bridge / 初音ミク V6`を選ぶ
-4. 最初は`Assisted`で1件通し、その後`Automatic`へ切り替える
+3. YMM4の声質で`VOCALOID6 Bridge / 初音ミク V6 ORIGINAL`を選ぶ
+4. 初期値の`Automatic`で生成する。自動操作に失敗した場合だけ`Assisted`へ切り替える
 
 自動モードでは専用のVOCALOID6プロジェクトを使ってください。名前付きの非Bridgeトラックがあるプロジェクトは変更せず、補助手動モードへ戻ります。
 

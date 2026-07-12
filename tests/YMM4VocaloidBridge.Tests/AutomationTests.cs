@@ -45,12 +45,21 @@ public sealed class AutomationTests : IDisposable
             "fake-assisted",
             false,
             ["assisted-ready"])));
+        VocaloidAutomationException? observedFailure = null;
 
-        var result = await new FallbackVocaloidDriver(automatic, assisted).RenderAsync(request);
+        var result = await new FallbackVocaloidDriver(
+            automatic,
+            assisted,
+            exception =>
+            {
+                observedFailure = exception;
+                return Task.CompletedTask;
+            }).RenderAsync(request);
 
         Assert.True(result.UsedFallback);
         Assert.Equal("fake-assisted", result.DriverName);
         Assert.StartsWith("automatic-failed:", result.Events[0], StringComparison.Ordinal);
+        Assert.Equal("test-failure", observedFailure?.Message);
     }
 
     public void Dispose()

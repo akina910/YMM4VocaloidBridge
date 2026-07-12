@@ -24,7 +24,7 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
 
     public string EngineName => "VOCALOID6 Bridge";
 
-    public string SpeakerName => "初音ミク V6";
+    public string SpeakerName => "初音ミク V6 ORIGINAL";
 
     public string API => "YMM4VocaloidBridge.Vocaloid6";
 
@@ -82,6 +82,7 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
             var workDirectory = Path.Combine(ApplicationDataDirectory, "work", cacheKey);
             Directory.CreateDirectory(workDirectory);
             CleanupOldWorkspaces(Path.Combine(ApplicationDataDirectory, "work"), TimeSpan.FromDays(7));
+            var waveOutput = SynthesisWaveOutput.Create(filePath, workDirectory);
 
             var artifacts = await SynthesisArtifactBuilder.CreateDefault()
                 .BuildAsync(text, options, workDirectory)
@@ -98,11 +99,24 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
             var waiter = new FileReadyWaiter(waveValidator);
             IVocaloidDriver assisted = new AssistedVocaloidDriver(waiter);
             IVocaloidDriver driver = options.DriverMode == VocaloidDriverMode.Automatic
-                ? new FallbackVocaloidDriver(new Vocaloid6AutomationDriver(waiter), assisted)
+                ? new FallbackVocaloidDriver(
+                    new Vocaloid6AutomationDriver(waiter),
+                    assisted,
+                    exception => logger.WriteAsync("automatic-failed", new { exception.Message }))
                 : assisted;
-            var request = new VocaloidRenderRequest(artifacts, options, filePath, report.Installation);
+            await logger.WriteAsync(
+                "render-start",
+                new
+                {
+                    options.DriverMode,
+                    requestedExtension = Path.GetExtension(waveOutput.RequestedPath),
+                    renderExtension = Path.GetExtension(waveOutput.RenderPath),
+                }).ConfigureAwait(false);
+            var request = new VocaloidRenderRequest(artifacts, options, waveOutput.RenderPath, report.Installation);
             var render = await driver.RenderAsync(request).ConfigureAwait(false);
-            _ = waveValidator.Validate(filePath);
+            _ = waveValidator.Validate(waveOutput.RenderPath);
+            await waveOutput.PublishAsync().ConfigureAwait(false);
+            _ = waveValidator.Validate(waveOutput.RequestedPath);
             await cache.StoreAsync(cacheKey, filePath).ConfigureAwait(false);
             await logger.WriteAsync(
                 "render-complete",
@@ -122,7 +136,7 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
                 "render-failed",
                 new { exception = exception.GetType().Name }).ConfigureAwait(false);
             throw new InvalidOperationException(
-                "初音ミク V6の音声生成に失敗しました。YMM4 Vocaloid Bridgeのdoctorとログを確認してください。",
+                "初音ミク V6 ORIGINALの音声生成に失敗しました。YMM4 Vocaloid Bridgeのdoctorとログを確認してください。",
                 exception);
         }
         finally

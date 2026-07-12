@@ -1,6 +1,6 @@
 # End-to-End Evidence
 
-Date: 2026-07-10
+Date: 2026-07-13
 
 Status: **PASS for beta compatibility target**
 
@@ -12,11 +12,25 @@ Status: **PASS for beta compatibility target**
 | .NET SDK | 10.0.301 |
 | YMM4 | 4.54.0.1 |
 | VOCALOID6 Editor | 6.12.0.1, Japanese UI |
-| HATSUNE MIKU V6 | 6.12.0, `HATSUNE_MIKU_V6_SOFT` |
+| HATSUNE MIKU V6 | 6.12.0, `HATSUNE_MIKU_V6_ORIGINAL` |
 
-## Automatic render soak
+## HATSUNE MIKU V6 ORIGINAL verification
 
-Twenty different short Japanese dialogues were rendered consecutively through the complete automatic path:
+One short Japanese dialogue (`初音ミクです。よろしくお願いします。`) was rendered through the complete automatic path with `HATSUNE_MIKU_V6_ORIGINAL` explicitly selected.
+
+Result: **passed in 20.4 seconds with no assisted fallback**.
+
+| Measurement | Result |
+| --- | --- |
+| Output size | 923,388 bytes |
+| Format | RIFF/WAVE PCM, stereo, 44.1 kHz |
+| SHA-256 | `5840963892DDEAA36822E05F764C6CAFDCF4381AC175920D6D1AB32625670A30` |
+
+The run also verified automatic dismissal of VOCALOID6's optional update prompt, the child-text based `NEW PROJECT` control, the child-text based ORIGINAL voicebank entry, MIDI import, Solo isolation, Audio Mixdown, Solo restoration, and final WAVE validation.
+
+## Automatic render soak baseline
+
+Before the ORIGINAL target was fixed, twenty different short Japanese dialogues were rendered consecutively through the complete automatic path with `HATSUNE_MIKU_V6_SOFT`. This is retained as an automation stability baseline, not as ORIGINAL voicebank evidence:
 
 1. Kuromoji reading and mora generation
 2. deterministic dialogue note planning
@@ -56,6 +70,7 @@ This contract test does not open the downloaded YMM4 executable. Final confirmat
 - An unavailable or renamed UI element raises `VocaloidAutomationException` with the failed stage information.
 - Automatic failure opens the assisted guide and waits for the same requested WAV path.
 - Stale Windows file dialogs are dismissed at the next automatic request.
+- The known optional VOCALOID6 update prompt is declined without changing update settings.
 - A named non-bridge track prevents automatic modification and triggers assisted fallback.
 - WAV files are accepted only after their size stabilizes and their RIFF/PCM structure is valid.
 

@@ -16,7 +16,7 @@ The bundled doctor CLI is self-contained; it does not require a separate global 
 1. Close YMM4.
 2. Double-click `YMM4VocaloidBridge.v.<version>.ymme` and approve the YMM4 plugin installation.
 3. Start YMM4.
-4. Select `初音ミク V6` under the `VOCALOID6 Bridge` voice engine.
+4. Select `初音ミク V6 ORIGINAL` under the `VOCALOID6 Bridge` voice engine.
 
 For a manual portable install, extract the package and place its `YMM4VocaloidBridge` folder under:
 
@@ -43,9 +43,9 @@ Add `--ui` to open the desktop diagnostic window:
 
 ## First render
 
-The default `Assisted` mode creates a lyric MIDI and opens VOCALOID6 plus an instruction file. Import the listed MIDI, select `HATSUNE_MIKU_V6_SOFT`, then use Audio Mixdown to save the WAV to the exact listed path. YMM4 resumes when the validated WAV appears.
+The default `Automatic` mode imports the generated lyric MIDI, selects `HATSUNE_MIKU_V6_ORIGINAL`, and requests Audio Mixdown through VOCALOID6. If a supported UI element is unavailable, the same request falls back to `Assisted` without discarding its MIDI.
 
-After assisted mode works, change `連携モード` to `Automatic`. If a supported UI element is unavailable, the same request returns to assisted mode without discarding its MIDI.
+In `Assisted`, import the listed MIDI, select `HATSUNE_MIKU_V6_ORIGINAL`, then use Audio Mixdown to save the WAV to the exact listed path. YMM4 resumes when the validated WAV appears.
 
 ## Data locations
 

@@ -16,6 +16,19 @@ All notable changes to this project are documented in this file.
 - Desktop `doctor --ui` diagnostic window.
 - `.ymme` packaging, Windows CI, package verification, notices, and public contribution templates.
 
+### Changed
+
+- Default voicebank and YMM4 speaker label now target `HATSUNE_MIKU_V6_ORIGINAL`.
+- Automatic mode is now the default YMM4 parameter; assisted fallback remains available.
+
+### Fixed
+
+- Render to an internal `.wav` before publishing to YMM4's temporary output extension.
+- Handle the VOCALOID6 update prompt and nameless controls whose labels are exposed as child text.
+- Launch VOCALOID6 against its installed .NET 8 runtime when the bridge itself runs under a private .NET 10 runtime.
+- Preserve lip-sync pronounce data across Newtonsoft.Json project serialization.
+- Report the failed automation stage and restore Solo without masking the original error.
+
 ### Known limitations
 
 - Initial compatibility target is Windows 11, Japanese VOCALOID6 6.12, HATSUNE MIKU V6, and current YMM4.

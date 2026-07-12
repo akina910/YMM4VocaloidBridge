@@ -39,13 +39,14 @@ var voices = GetProperty<IEnumerable>(plugin, "Voices").Cast<object>().ToArray()
 RequireEqual(1, voices.Length, "voice count");
 var speaker = voices[0];
 RequireEqual("VOCALOID6 Bridge", GetProperty<string>(speaker, "EngineName"), "engine name");
-RequireEqual("初音ミク V6", GetProperty<string>(speaker, "SpeakerName"), "speaker name");
+RequireEqual("初音ミク V6 ORIGINAL", GetProperty<string>(speaker, "SpeakerName"), "speaker name");
 RequireEqual("YMM4VocaloidBridge.Vocaloid6", GetProperty<string>(speaker, "API"), "speaker API");
 RequireEqual("HATSUNE_MIKU_V6", GetProperty<string>(speaker, "ID"), "speaker ID");
 
 var parameter = Invoke(speaker, "CreateVoiceParameter")
     ?? throw new InvalidOperationException("Voice parameter could not be created.");
 RequireEqual("MikuV6VoiceParameter", parameter.GetType().Name, "parameter type");
+RequireEqual("Automatic", GetProperty<object>(parameter, "DriverMode").ToString(), "default driver mode");
 
 var readingTask = (Task)(Invoke(speaker, "ConvertKanjiToYomiAsync", "今日は初音ミクです。", parameter)
     ?? throw new InvalidOperationException("Reading task was not returned."));
@@ -73,6 +74,30 @@ if (ReferenceEquals(pronounce, clone))
     throw new InvalidOperationException("Pronounce clone returned the original instance.");
 }
 
+var newtonsoftAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
+    Path.Combine(ymm4Directory, "Newtonsoft.Json.dll"));
+var jsonConvertType = RequireType(newtonsoftAssembly, "Newtonsoft.Json.JsonConvert");
+var serializeObject = jsonConvertType.GetMethod(
+    "SerializeObject",
+    BindingFlags.Public | BindingFlags.Static,
+    binder: null,
+    types: [typeof(object)],
+    modifiers: null)
+    ?? throw new MissingMethodException(jsonConvertType.FullName, "SerializeObject(object)");
+var deserializeObject = jsonConvertType.GetMethod(
+    "DeserializeObject",
+    BindingFlags.Public | BindingFlags.Static,
+    binder: null,
+    types: [typeof(string), typeof(Type)],
+    modifiers: null)
+    ?? throw new MissingMethodException(jsonConvertType.FullName, "DeserializeObject(string, Type)");
+var pronounceJson = serializeObject.Invoke(null, [pronounce]) as string
+    ?? throw new InvalidOperationException("Pronounce JSON was not returned.");
+var roundTripPronounce = deserializeObject.Invoke(null, [pronounceJson, pronounceType])
+    ?? throw new InvalidOperationException("Pronounce JSON round trip returned null.");
+var roundTripFrames = GetProperty<Array>(roundTripPronounce, "LipSyncFrames");
+RequireEqual(2, roundTripFrames.Length, "round-trip lip-sync frame count");
+
 Console.WriteLine(JsonSerializer.Serialize(new
 {
     status = "PASS",
@@ -80,6 +105,7 @@ Console.WriteLine(JsonSerializer.Serialize(new
     speaker = GetProperty<string>(speaker, "SpeakerName"),
     reading,
     lipSyncFrames = ymmFrames.Length,
+    serializedLipSyncFrames = roundTripFrames.Length,
 }));
 return 0;
 

@@ -1,3 +1,5 @@
+using Newtonsoft.Json;
+
 using YukkuriMovieMaker.Commons;
 using YukkuriMovieMaker.Plugin.Voice;
 using YukkuriMovieMaker.UndoRedo;
@@ -11,14 +13,16 @@ public sealed class MikuV6Pronounce : UndoRedoable, IVoicePronounce
 {
     public MikuV6Pronounce(IEnumerable<CoreFrame> frames)
     {
+        ArgumentNullException.ThrowIfNull(frames);
         LipSyncFrames = frames
             .Select(frame => new LipSyncFrame(frame.Time, Map(frame.Shape)))
             .ToArray();
     }
 
-    private MikuV6Pronounce(LipSyncFrame[] frames)
+    [JsonConstructor]
+    public MikuV6Pronounce(LipSyncFrame[]? lipSyncFrames)
     {
-        LipSyncFrames = frames.ToArray();
+        LipSyncFrames = lipSyncFrames?.ToArray() ?? [];
     }
 
     public LipSyncFrame[] LipSyncFrames { get; }

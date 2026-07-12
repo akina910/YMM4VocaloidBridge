@@ -10,14 +10,14 @@ namespace YMM4VocaloidBridge.Plugin;
 
 public sealed class MikuV6VoiceParameter : VoiceParameterBase
 {
-    private VocaloidDriverMode driverMode = VocaloidDriverMode.Assisted;
+    private VocaloidDriverMode driverMode = VocaloidDriverMode.Automatic;
     private int tempoBpm = 120;
     private int baseNote = 60;
     private int timeoutSeconds = 300;
 
     [Display(Name = "連携モード", Description = "自動操作、またはMIDI読み込みとWAV書き出しを手動で行う補助モード")]
     [EnumComboBox]
-    [DefaultValue(VocaloidDriverMode.Assisted)]
+    [DefaultValue(VocaloidDriverMode.Automatic)]
     public VocaloidDriverMode DriverMode
     {
         get => driverMode;

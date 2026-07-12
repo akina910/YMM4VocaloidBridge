@@ -149,9 +149,13 @@ internal static class BridgeCli
             .ConfigureAwait(false);
         var waiter = new FileReadyWaiter(new WaveFileValidator());
         IVocaloidDriver assisted = new AssistedVocaloidDriver(waiter);
-        IVocaloidDriver driver = options.DriverMode == VocaloidDriverMode.Automatic
-            ? new FallbackVocaloidDriver(new Vocaloid6AutomationDriver(waiter), assisted)
-            : assisted;
+        var automatic = new Vocaloid6AutomationDriver(waiter);
+        IVocaloidDriver driver = options.DriverMode switch
+        {
+            VocaloidDriverMode.Automatic when arguments.HasFlag("no-fallback") => automatic,
+            VocaloidDriverMode.Automatic => new FallbackVocaloidDriver(automatic, assisted),
+            _ => assisted,
+        };
         var result = await driver.RenderAsync(
             new VocaloidRenderRequest(artifacts, options, outputPath, installation.Installation))
             .ConfigureAwait(false);
@@ -177,7 +181,7 @@ internal static class BridgeCli
             TempoBpm = arguments.GetInt("tempo", 120),
             BaseNote = arguments.GetInt("base-note", 60),
             TimeoutSeconds = arguments.GetInt("timeout", 300),
-            VoicebankName = arguments.GetOptional("voicebank") ?? "HATSUNE_MIKU_V6_SOFT",
+            VoicebankName = arguments.GetOptional("voicebank") ?? BridgeOptions.DefaultVoicebankName,
         }.Validate();
     }
 
@@ -197,7 +201,7 @@ internal static class BridgeCli
             inspect-ui [--depth 6] [--menu ファイル]
             inspect-tracks
             generate --text <dialogue> --out-dir <directory> [--tempo 120] [--base-note 60]
-            synthesize --text <dialogue> --output <file.wav> [--mode assisted|automatic] [--timeout 300]
+            synthesize --text <dialogue> --output <file.wav> [--mode assisted|automatic] [--no-fallback] [--timeout 300]
             """);
     }
 }
