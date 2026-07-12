@@ -1,0 +1,77 @@
+param(
+    [string]$Configuration = "Release",
+    [string]$Version = "0.1.0-beta.1",
+    [string]$Ymm4DirPath = $env:YMM4_DIR
+)
+
+$ErrorActionPreference = "Stop"
+$root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$artifacts = [System.IO.Path]::GetFullPath((Join-Path $root "artifacts"))
+$publishRoot = Join-Path $artifacts "publish"
+$stagingRoot = Join-Path $artifacts "ymme-staging"
+$pluginFolder = Join-Path $stagingRoot "YMM4VocaloidBridge"
+$packagePath = Join-Path $artifacts "YMM4VocaloidBridge.v.$Version.ymme"
+$zipPath = [System.IO.Path]::ChangeExtension($packagePath, ".zip")
+
+if ([string]::IsNullOrWhiteSpace($Ymm4DirPath)) {
+    $localYmm4 = Join-Path $root "..\runtime\YMM4-v4.54.0.1"
+    if (Test-Path (Join-Path $localYmm4 "YukkuriMovieMaker.Plugin.dll")) {
+        $Ymm4DirPath = [System.IO.Path]::GetFullPath($localYmm4)
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($Ymm4DirPath) -or -not (Test-Path (Join-Path $Ymm4DirPath "YukkuriMovieMaker.Plugin.dll"))) {
+    throw "Set YMM4_DIR or -Ymm4DirPath to a YMM4 directory containing YukkuriMovieMaker.Plugin.dll."
+}
+
+foreach ($path in @($publishRoot, $stagingRoot)) {
+    $resolved = [System.IO.Path]::GetFullPath($path)
+    if (-not $resolved.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a path outside the artifacts directory: $resolved"
+    }
+    if (Test-Path -LiteralPath $resolved) {
+        Remove-Item -LiteralPath $resolved -Recurse -Force
+    }
+}
+
+$dotnet = Get-Command dotnet -ErrorAction Stop
+$pluginPublish = Join-Path $publishRoot "plugin"
+$cliPublish = Join-Path $publishRoot "cli"
+& $dotnet.Source publish (Join-Path $root "src\YMM4VocaloidBridge.Plugin\YMM4VocaloidBridge.Plugin.csproj") `
+    -c $Configuration -o $pluginPublish --no-self-contained "-p:YMM4DirPath=$Ymm4DirPath" "-p:Version=$Version"
+if ($LASTEXITCODE -ne 0) { throw "Plugin publish failed." }
+
+& $dotnet.Source publish (Join-Path $root "src\YMM4VocaloidBridge.Cli\YMM4VocaloidBridge.Cli.csproj") `
+    -c $Configuration -o $cliPublish -r win-x64 --self-contained true `
+    "-p:PublishSingleFile=true" "-p:IncludeNativeLibrariesForSelfExtract=true" `
+    "-p:EnableCompressionInSingleFile=true" "-p:Version=$Version"
+if ($LASTEXITCODE -ne 0) { throw "CLI publish failed." }
+
+New-Item -ItemType Directory -Path $pluginFolder -Force | Out-Null
+Copy-Item -Path (Join-Path $pluginPublish "*") -Destination $pluginFolder -Recurse -Force
+
+Get-ChildItem -Path $pluginFolder -Recurse -File | Where-Object {
+    $_.Name -like "*.pdb" -or
+    $_.Name -like "YukkuriMovieMaker.*" -or
+    $_.Name -like "System.*.dll" -or
+    $_.Name -eq "Microsoft.Windows.SDK.NET.dll" -or
+    $_.Name -eq "WinRT.Runtime.dll"
+} | Remove-Item -Force
+
+$toolsFolder = Join-Path $pluginFolder "tools"
+New-Item -ItemType Directory -Path $toolsFolder -Force | Out-Null
+Copy-Item -Path (Join-Path $cliPublish "*") -Destination $toolsFolder -Recurse -Force
+Get-ChildItem -Path $toolsFolder -Recurse -File -Filter "*.pdb" | Remove-Item -Force
+
+Copy-Item (Join-Path $root "README.md") $pluginFolder
+Copy-Item (Join-Path $root "LICENSE") $pluginFolder
+Copy-Item (Join-Path $root "THIRD-PARTY-NOTICES.md") $pluginFolder
+Copy-Item (Join-Path $root "docs\INSTALLATION.md") $pluginFolder
+Copy-Item (Join-Path $root "licenses") $pluginFolder -Recurse
+
+if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force }
+Compress-Archive -Path $pluginFolder -DestinationPath $zipPath -CompressionLevel Optimal
+Move-Item -LiteralPath $zipPath -Destination $packagePath
+
+Write-Output $packagePath

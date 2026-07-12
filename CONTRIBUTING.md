@@ -18,6 +18,28 @@ YMM4VocaloidBridgeへのIssue、設計提案、ドキュメント修正、コー
 - Draft PRを早めに出して、設計段階から相談して構いません。
 - メンテナーが編集できる設定を有効にしてください。
 
+## 開発環境
+
+- Windows 11
+- .NET SDK 10.0.301以上の同一feature band
+- 正規に取得した現行YMM4のローカル展開先
+
+```powershell
+dotnet restore tests\YMM4VocaloidBridge.Tests\YMM4VocaloidBridge.Tests.csproj
+dotnet test tests\YMM4VocaloidBridge.Tests\YMM4VocaloidBridge.Tests.csproj -c Release
+dotnet build src\YMM4VocaloidBridge.Plugin\YMM4VocaloidBridge.Plugin.csproj `
+  -c Release -p:YMM4DirPath="C:\path\to\YMM4"
+```
+
+MIDI/LABだけを確認する場合は製品を起動せずに実行できます。
+
+```powershell
+dotnet run --project src\YMM4VocaloidBridge.Cli -- `
+  generate --text "今日は初音ミクです。" --out-dir artifacts\smoke
+```
+
+`.ymme`を作成する場合は`YMM4_DIR`を設定して`tools\build-package.ps1`を実行します。生成物へYMM4、VOCALOID6、ボイスバンク、キャラクター素材が入っていないことを必ず確認してください。
+
 ## PRに必要な情報
 
 - 解決する問題と関連Issue
