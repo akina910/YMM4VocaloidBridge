@@ -754,6 +754,14 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         {
             return null;
         }
+        catch (ElementNotAvailableException)
+        {
+            return null;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null;
+        }
     }
 
     private static void EnsureDedicatedBridgeProject(AutomationElement mainWindow)
