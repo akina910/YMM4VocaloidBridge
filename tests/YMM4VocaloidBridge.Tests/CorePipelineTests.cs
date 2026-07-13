@@ -99,10 +99,12 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal(TimeSpan.FromMilliseconds(100), result.Duration);
     }
 
-    [Fact]
-    public async Task Wave_output_renders_as_wav_then_publishes_to_requested_temporary_path()
+    [Theory]
+    [InlineData("output.rje.tmp")]
+    [InlineData("output.wav")]
+    public async Task Wave_output_renders_separately_then_publishes_atomically(string fileName)
     {
-        var requested = Path.Combine(temporaryDirectory, "voice", "output.rje.tmp");
+        var requested = Path.Combine(temporaryDirectory, "voice", fileName);
         var work = Path.Combine(temporaryDirectory, "work");
         var output = SynthesisWaveOutput.Create(requested, work);
 
@@ -114,6 +116,60 @@ public sealed class CorePipelineTests : IDisposable
 
         Assert.Equal(File.ReadAllBytes(output.RenderPath), File.ReadAllBytes(output.RequestedPath));
         _ = new WaveFileValidator().Validate(output.RequestedPath);
+    }
+
+    [Fact]
+    public async Task Wave_output_cancellation_preserves_existing_requested_file()
+    {
+        var requested = Path.Combine(temporaryDirectory, "voice", "output.rje.tmp");
+        var work = Path.Combine(temporaryDirectory, "work");
+        var output = SynthesisWaveOutput.Create(requested, work);
+        var existing = Encoding.ASCII.GetBytes("existing-complete-output");
+        Directory.CreateDirectory(Path.GetDirectoryName(requested)!);
+        await File.WriteAllBytesAsync(requested, existing);
+        WritePcmWave(output.RenderPath, sampleRate: 44_100, sampleCount: 441);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => output.PublishAsync(new CancellationToken(canceled: true)));
+
+        Assert.Equal(existing, await File.ReadAllBytesAsync(requested));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(requested)!, "*.tmp-*"));
+    }
+
+    [Fact]
+    public void Wave_output_avoids_requested_path_that_matches_default_render_name()
+    {
+        var work = Path.Combine(temporaryDirectory, "work");
+        var requested = Path.Combine(work, "render.wav");
+
+        var output = SynthesisWaveOutput.Create(requested, work);
+
+        Assert.Equal(Path.GetFullPath(requested), output.RequestedPath);
+        Assert.NotEqual(output.RequestedPath, output.RenderPath);
+        Assert.Equal(".wav", Path.GetExtension(output.RenderPath), StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Wave_output_retries_a_temporarily_locked_destination()
+    {
+        var requested = Path.Combine(temporaryDirectory, "voice", "output.wav");
+        var work = Path.Combine(temporaryDirectory, "work");
+        var output = SynthesisWaveOutput.Create(requested, work);
+        Directory.CreateDirectory(Path.GetDirectoryName(requested)!);
+        await File.WriteAllBytesAsync(requested, Encoding.ASCII.GetBytes("existing-complete-output"));
+        WritePcmWave(output.RenderPath, sampleRate: 44_100, sampleCount: 441);
+        var expected = await File.ReadAllBytesAsync(output.RenderPath);
+
+        Task publish;
+        await using (var locked = File.Open(requested, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            publish = output.PublishAsync();
+            await Task.Delay(150);
+            Assert.False(publish.IsCompletedSuccessfully);
+        }
+
+        await publish;
+        Assert.Equal(expected, await File.ReadAllBytesAsync(requested));
     }
 
     [Fact]
@@ -130,6 +186,85 @@ public sealed class CorePipelineTests : IDisposable
 
         Assert.True(restored);
         Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(destination));
+    }
+
+    [Fact]
+    public async Task Cache_restore_cancellation_preserves_existing_destination()
+    {
+        var source = Path.Combine(temporaryDirectory, "source.wav");
+        var destination = Path.Combine(temporaryDirectory, "restored.wav");
+        WritePcmWave(source, sampleRate: 44_100, sampleCount: 441);
+        var existing = Encoding.ASCII.GetBytes("existing-complete-output");
+        await File.WriteAllBytesAsync(destination, existing);
+        var cache = new SynthesisCache(Path.Combine(temporaryDirectory, "cache"));
+        const string key = "atomic-restore";
+        await cache.StoreAsync(key, source);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cache.TryRestoreAsync(key, destination, new CancellationToken(canceled: true)));
+
+        Assert.Equal(existing, await File.ReadAllBytesAsync(destination));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(destination)!, "*.tmp-*"));
+    }
+
+    [Fact]
+    public async Task Cache_missing_key_returns_false_without_touching_destination()
+    {
+        var destination = Path.Combine(temporaryDirectory, "restored.wav");
+        var existing = Encoding.ASCII.GetBytes("existing-complete-output");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await File.WriteAllBytesAsync(destination, existing);
+        var cache = new SynthesisCache(Path.Combine(temporaryDirectory, "cache"));
+
+        var restored = await cache.TryRestoreAsync("missing", destination);
+
+        Assert.False(restored);
+        Assert.Equal(existing, await File.ReadAllBytesAsync(destination));
+    }
+
+    [Fact]
+    public async Task Concurrent_cache_stores_publish_one_complete_wave()
+    {
+        var first = Path.Combine(temporaryDirectory, "first.wav");
+        var second = Path.Combine(temporaryDirectory, "second.wav");
+        var destination = Path.Combine(temporaryDirectory, "restored.wav");
+        WritePcmWave(first, sampleRate: 44_100, sampleCount: 441);
+        WritePcmWave(second, sampleRate: 48_000, sampleCount: 882);
+        var firstBytes = await File.ReadAllBytesAsync(first);
+        var secondBytes = await File.ReadAllBytesAsync(second);
+        var cache = new SynthesisCache(Path.Combine(temporaryDirectory, "cache"));
+        const string key = "concurrent-store";
+
+        await Task.WhenAll(cache.StoreAsync(key, first), cache.StoreAsync(key, second));
+        Assert.True(await cache.TryRestoreAsync(key, destination));
+
+        var restored = await File.ReadAllBytesAsync(destination);
+        Assert.True(restored.SequenceEqual(firstBytes) || restored.SequenceEqual(secondBytes));
+        _ = new WaveFileValidator().Validate(destination);
+    }
+
+    [Fact]
+    public async Task Concurrent_cache_restore_and_store_do_not_publish_partial_files()
+    {
+        var first = Path.Combine(temporaryDirectory, "first.wav");
+        var second = Path.Combine(temporaryDirectory, "second.wav");
+        var destination = Path.Combine(temporaryDirectory, "restored.wav");
+        WritePcmWave(first, sampleRate: 44_100, sampleCount: 44_100);
+        WritePcmWave(second, sampleRate: 48_000, sampleCount: 48_000);
+        var firstBytes = await File.ReadAllBytesAsync(first);
+        var secondBytes = await File.ReadAllBytesAsync(second);
+        var cache = new SynthesisCache(Path.Combine(temporaryDirectory, "cache"));
+        const string key = "concurrent-restore-store";
+        await cache.StoreAsync(key, first);
+
+        var restore = cache.TryRestoreAsync(key, destination);
+        var store = cache.StoreAsync(key, second);
+        await Task.WhenAll(restore, store);
+
+        Assert.True(await restore);
+        var restored = await File.ReadAllBytesAsync(destination);
+        Assert.True(restored.SequenceEqual(firstBytes) || restored.SequenceEqual(secondBytes));
+        _ = new WaveFileValidator().Validate(destination);
     }
 
     [Fact]

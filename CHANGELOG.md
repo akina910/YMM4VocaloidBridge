@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.0-beta.2 - 2026-07-13
+
+### Fixed
+
+- Publish cache restores and YMM4 output files through same-directory temporary files and atomic replacement.
+- Preserve existing completed output when copying is cancelled or fails.
+- Handle cache read/write races with delete-sharing and transient Windows destination-lock retries.
+- Keep cleanup failures from masking the original render or cancellation exception.
+
+### Verification
+
+- Claude and GitHub Copilot independent reviews report no remaining P0/P1 findings.
+- Added cancellation, cache-miss, concurrent store/restore, `.wav`, temporary-extension, and locked-destination tests.
+
 ## 0.1.0-beta.1 - 2026-07-10
 
 ### Added
