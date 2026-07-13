@@ -3,11 +3,6 @@ name: Build YMME package
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - ".github/workflows/package.yml"
-      - "src/**"
-      - "tests/**"
-      - "tools/build-package.ps1"
   push:
     tags: ["v*"]
 
