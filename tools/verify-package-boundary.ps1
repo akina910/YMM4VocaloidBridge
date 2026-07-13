@@ -29,10 +29,54 @@ $secretPatterns = @(
     'AKIA[0-9A-Z]{16}'
 )
 $absolutePathPatterns = @(
-    '[A-Za-z]:\\Users\\[^\\\x00]+\\',
-    '/Users/[^/\x00]+/',
-    '/home/[^/\x00]+/'
+    '[A-Za-z]:\\Users\\[^\\\x00]{1,255}\\',
+    '/Users/[^/\x00]{1,255}/',
+    '/home/[^/\x00]{1,255}/'
 )
+$contentPatterns = @($secretPatterns + $absolutePathPatterns | ForEach-Object {
+    [System.Text.RegularExpressions.Regex]::new(
+        $_,
+        [System.Text.RegularExpressions.RegexOptions]::CultureInvariant,
+        [TimeSpan]::FromSeconds(1))
+})
+
+function Test-ForbiddenContent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [System.Text.RegularExpressions.Regex[]]$Patterns
+    )
+
+    $chunkCharacters = 64KB
+    # Longer than every bounded pattern so matches crossing a chunk boundary survive.
+    $overlapCharacters = 512
+    $encodings = @([System.Text.Encoding]::ASCII, [System.Text.Encoding]::Unicode)
+    foreach ($encoding in $encodings) {
+        $reader = [System.IO.StreamReader]::new($Path, $encoding, $false, $chunkCharacters)
+        try {
+            $buffer = [char[]]::new($chunkCharacters)
+            $overlap = [string]::Empty
+            while (($read = $reader.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $text = $overlap + [string]::new($buffer, 0, $read)
+                foreach ($pattern in $Patterns) {
+                    if ($pattern.IsMatch($text)) {
+                        return $true
+                    }
+                }
+
+                $overlapLength = [Math]::Min($overlapCharacters, $text.Length)
+                $overlap = $text.Substring($text.Length - $overlapLength, $overlapLength)
+            }
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+
+    return $false
+}
 
 $unexpected = [System.Collections.Generic.List[string]]::new()
 $files = Get-ChildItem -LiteralPath $root -Recurse -File
@@ -51,14 +95,8 @@ foreach ($file in $files) {
         $unexpected.Add("forbidden extension: $relative")
     }
 
-    $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
-    $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
-    $unicode = [System.Text.Encoding]::Unicode.GetString($bytes)
-    foreach ($pattern in $secretPatterns + $absolutePathPatterns) {
-        if ($ascii -match $pattern -or $unicode -match $pattern) {
-            $unexpected.Add("forbidden content pattern in: $relative")
-            break
-        }
+    if (Test-ForbiddenContent -Path $file.FullName -Patterns $contentPatterns) {
+        $unexpected.Add("forbidden content pattern in: $relative")
     }
 }
 
