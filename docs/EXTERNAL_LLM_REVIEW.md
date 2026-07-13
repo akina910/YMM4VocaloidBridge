@@ -33,3 +33,28 @@ Claude's initial repository-agent runs timed out and were not counted. Claude wa
 - `git diff --check` passed.
 
 The final Claude and Copilot verdicts are both PASS. Gemini remains explicitly blocked rather than being reported as reviewed or passing.
+
+## Completion-gate patch review (2026-07-13)
+
+The staged beta.3 completion-gate patch was reviewed again after the earlier release was found to lack real YMM4 standing-image evidence, rendered-WAVE lip-sync alignment, and reproducible package provenance.
+
+| Reviewer | Result |
+| --- | --- |
+| GitHub Copilot CLI 1.0.70 | Completed chunked diff reviews. Initial P1/P2 findings were fixed; final focused reviews found no remaining P0/P1 in audio/cache or release provenance. Follow-up automation and boundary findings were also addressed locally and revalidated. |
+| Claude Code 2.1.139 / Sonnet | **BLOCKED**: authenticated, but both the repository review (5 minutes) and tools-disabled diff review (4 minutes) timed out without a verdict. |
+| Gemini CLI 0.43.0 | **BLOCKED**: `UNSUPPORTED_CLIENT` / `IneligibleTierError`; no review verdict was produced. |
+
+Copilot findings addressed in this patch include:
+
+- preserve punctuation through YMM4's custom-reading round trip;
+- invalidate pre-change audio caches after prosody and alignment changes;
+- prevent silent or unsupported WAVE data from being cached as successful speech;
+- support PCM/float `WAVE_FORMAT_EXTENSIBLE` and consistent first-data-chunk parsing;
+- keep every viseme transition at a unique timestamp and within the audio duration;
+- verify ORIGINAL through selection actions or observable assigned UI values without treating unrelated combo boxes as failures;
+- retain the prior `voicebank-selected` event while adding the verified event;
+- isolate tag-release write permission in a separate job;
+- scan packaged binaries for narrow and UTF-16LE secrets/absolute user paths;
+- require a clean worktree, matching RID clean, embedded source revision, and CI revision checks for plugin DLLs and the CLI executable.
+
+This review evidence does not replace the remaining real YMM4 standing-image preview and ORIGINAL soak gates. Until those run, the product-level result remains **BLOCKED**, not PASS.

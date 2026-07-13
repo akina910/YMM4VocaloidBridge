@@ -47,12 +47,13 @@ var parameter = Invoke(speaker, "CreateVoiceParameter")
     ?? throw new InvalidOperationException("Voice parameter could not be created.");
 RequireEqual("MikuV6VoiceParameter", parameter.GetType().Name, "parameter type");
 RequireEqual("Automatic", GetProperty<object>(parameter, "DriverMode").ToString(), "default driver mode");
+RequireEqual(33, GetProperty<int>(parameter, "LipSyncLeadMilliseconds"), "default lip-sync lead");
 
 var readingTask = (Task)(Invoke(speaker, "ConvertKanjiToYomiAsync", "今日は初音ミクです。", parameter)
     ?? throw new InvalidOperationException("Reading task was not returned."));
 await readingTask.ConfigureAwait(false);
 var reading = readingTask.GetType().GetProperty("Result")?.GetValue(readingTask) as string;
-RequireEqual("キョーワハツネミクデス", reading, "Japanese reading");
+RequireEqual("キョーワハツネミクデス。", reading, "Japanese reading with punctuation");
 
 var coreAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
     Path.Combine(pluginDirectory, "YMM4VocaloidBridge.Core.dll"));

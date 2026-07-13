@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.1.0-beta.1",
+    [string]$Version = "0.1.0-beta.3",
     [string]$Ymm4DirPath = $env:YMM4_DIR
 )
 
@@ -12,6 +12,17 @@ $stagingRoot = Join-Path $artifacts "ymme-staging"
 $pluginFolder = Join-Path $stagingRoot "YMM4VocaloidBridge"
 $packagePath = Join-Path $artifacts "YMM4VocaloidBridge.v.$Version.ymme"
 $zipPath = [System.IO.Path]::ChangeExtension($packagePath, ".zip")
+$sourceRevision = (& git -C $root rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch "^[0-9a-f]{40}$") {
+    throw "Could not determine the source revision for the package."
+}
+$worktreeChanges = & git -C $root status --porcelain=v1 --untracked-files=all
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not determine whether the package source is clean."
+}
+if ($worktreeChanges) {
+    throw "Refusing to package an uncommitted worktree. Commit the exact source first."
+}
 
 if ([string]::IsNullOrWhiteSpace($Ymm4DirPath)) {
     $localYmm4 = Join-Path $root "..\runtime\YMM4-v4.54.0.1"
@@ -37,14 +48,21 @@ foreach ($path in @($publishRoot, $stagingRoot)) {
 $dotnet = Get-Command dotnet -ErrorAction Stop
 $pluginPublish = Join-Path $publishRoot "plugin"
 $cliPublish = Join-Path $publishRoot "cli"
+& $dotnet.Source clean (Join-Path $root "src\YMM4VocaloidBridge.Plugin\YMM4VocaloidBridge.Plugin.csproj") `
+    -c $Configuration "-p:YMM4DirPath=$Ymm4DirPath"
+if ($LASTEXITCODE -ne 0) { throw "Plugin clean failed." }
+& $dotnet.Source clean (Join-Path $root "src\YMM4VocaloidBridge.Cli\YMM4VocaloidBridge.Cli.csproj") `
+    -c $Configuration -r win-x64
+if ($LASTEXITCODE -ne 0) { throw "CLI clean failed." }
 & $dotnet.Source publish (Join-Path $root "src\YMM4VocaloidBridge.Plugin\YMM4VocaloidBridge.Plugin.csproj") `
-    -c $Configuration -o $pluginPublish --no-self-contained "-p:YMM4DirPath=$Ymm4DirPath" "-p:Version=$Version"
+    -c $Configuration -o $pluginPublish --no-self-contained "-p:YMM4DirPath=$Ymm4DirPath" `
+    "-p:Version=$Version" "-p:SourceRevisionId=$sourceRevision"
 if ($LASTEXITCODE -ne 0) { throw "Plugin publish failed." }
 
 & $dotnet.Source publish (Join-Path $root "src\YMM4VocaloidBridge.Cli\YMM4VocaloidBridge.Cli.csproj") `
     -c $Configuration -o $cliPublish -r win-x64 --self-contained true `
     "-p:PublishSingleFile=true" "-p:IncludeNativeLibrariesForSelfExtract=true" `
-    "-p:EnableCompressionInSingleFile=true" "-p:Version=$Version"
+    "-p:EnableCompressionInSingleFile=true" "-p:Version=$Version" "-p:SourceRevisionId=$sourceRevision"
 if ($LASTEXITCODE -ne 0) { throw "CLI publish failed." }
 
 New-Item -ItemType Directory -Path $pluginFolder -Force | Out-Null
@@ -68,6 +86,9 @@ Copy-Item (Join-Path $root "LICENSE") $pluginFolder
 Copy-Item (Join-Path $root "THIRD-PARTY-NOTICES.md") $pluginFolder
 Copy-Item (Join-Path $root "docs\INSTALLATION.md") $pluginFolder
 Copy-Item (Join-Path $root "licenses") $pluginFolder -Recurse
+
+& (Join-Path $PSScriptRoot "verify-package-boundary.ps1") -PackageRoot $stagingRoot
+if ($LASTEXITCODE -ne 0) { throw "Package boundary verification failed." }
 
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force }

@@ -114,11 +114,26 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         events.Add("editor-ready");
 
         events.Add("stage:ensure-project");
-        EnsureProjectAndVoicebank(mainWindow, request.Options.VoicebankName, cancellationToken);
-        events.Add("voicebank-selected");
+        var projectVoicebankSelected = EnsureProjectAndVoicebank(
+            mainWindow,
+            request.Options.VoicebankName,
+            cancellationToken);
         events.Add("stage:import-midi");
-        ImportMidi(mainWindow, request.Artifacts.MidiPath, request.Options.VoicebankName, cancellationToken);
+        var importVoicebankSelected = ImportMidi(
+            mainWindow,
+            request.Artifacts.MidiPath,
+            request.Options.VoicebankName,
+            cancellationToken);
         events.Add("midi-imported");
+        var assignedVoicebankConfirmed = IsVoicebankAssigned(mainWindow, request.Options.VoicebankName);
+        if (!projectVoicebankSelected && !importVoicebankSelected && !assignedVoicebankConfirmed)
+        {
+            throw new VocaloidAutomationException(
+                $"VOCALOID6 did not expose a verifiable '{request.Options.VoicebankName}' selection during project setup or MIDI import.");
+        }
+
+        events.Add("voicebank-selected");
+        events.Add("voicebank-selected-and-verified");
         events.Add("stage:enable-solo");
         var soloButton = EnableSoloForLastTrack(mainWindow);
         soloButtonReady(soloButton);
@@ -260,7 +275,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             .FirstOrDefault(x => automationIds.Contains(x.Current.AutomationId, StringComparer.Ordinal));
     }
 
-    private static void EnsureProjectAndVoicebank(
+    private static bool EnsureProjectAndVoicebank(
         AutomationElement mainWindow,
         string voicebankName,
         CancellationToken cancellationToken)
@@ -272,7 +287,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             addTrack = FindProcessElementByAutomationId(mainWindow.Current.ProcessId, Id.AddTrackDialog);
             if (addTrack is null)
             {
-                return;
+                return false;
             }
         }
 
@@ -297,9 +312,10 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             ?? throw new VocaloidAutomationException("The voicebank selector was not found.");
         SelectComboBoxItem(voicebank, voicebankName);
         InvokeButton(addTrack, "作成", "Create", "OK");
+        return true;
     }
 
-    private static void ImportMidi(
+    private static bool ImportMidi(
         AutomationElement mainWindow,
         string midiPath,
         string voicebankName,
@@ -338,13 +354,18 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         var mappingDialog = FindTransientWindow(mainWindow, cancellationToken, TimeSpan.FromSeconds(5));
         if (mappingDialog is not null)
         {
-            foreach (var comboBox in FindAllDescendants(mappingDialog, ControlType.ComboBox))
+            var comboBoxes = FindAllDescendants(mappingDialog, ControlType.ComboBox).ToArray();
+            var selected = false;
+            foreach (var comboBox in comboBoxes)
             {
-                SelectComboBoxItem(comboBox, voicebankName, required: false);
+                selected |= SelectComboBoxItem(comboBox, voicebankName, required: false);
             }
 
             InvokeButton(mappingDialog, "OK", "適用", "Apply", "インポート", "Import");
+            return selected;
         }
+
+        return false;
     }
 
     private static void ExportWave(
@@ -626,7 +647,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         throw new VocaloidAutomationException($"UI element '{element.Current.Name}' cannot be invoked.");
     }
 
-    private static void SelectComboBoxItem(AutomationElement comboBox, string itemName, bool required = true)
+    private static bool SelectComboBoxItem(AutomationElement comboBox, string itemName, bool required = true)
     {
         if (comboBox.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var expandPattern))
         {
@@ -644,7 +665,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
                 throw new VocaloidAutomationException($"Voicebank '{itemName}' was not listed by VOCALOID6.");
             }
 
-            return;
+            return false;
         }
 
         Invoke(item);
@@ -652,6 +673,8 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         {
             ((ExpandCollapsePattern)expandPattern).Collapse();
         }
+
+        return true;
     }
 
     private static bool MatchesListItemName(AutomationElement item, string itemName)
@@ -663,6 +686,54 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
                     .Any(x => x.Current.Name.Contains(itemName, StringComparison.OrdinalIgnoreCase));
         }
         catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsVoicebankAssigned(AutomationElement root, string voicebankName)
+    {
+        try
+        {
+            if (FindAllDescendants(root, ControlType.Text)
+                .Any(element => element.Current.Name.Contains(voicebankName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            foreach (var comboBox in FindAllDescendants(root, ControlType.ComboBox))
+            {
+                if (comboBox.Current.Name.Contains(voicebankName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (comboBox.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePattern)
+                    && ((ValuePattern)valuePattern).Current.Value.Contains(
+                        voicebankName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (comboBox.TryGetCurrentPattern(SelectionPattern.Pattern, out var selectionPattern)
+                    && ((SelectionPattern)selectionPattern).Current.GetSelection()
+                        .Any(item => MatchesListItemName(item, voicebankName)))
+                {
+                    return true;
+                }
+            }
+
+            return FindAllDescendants(root, ControlType.ListItem)
+                .Any(item => item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionItemPattern)
+                    && ((SelectionItemPattern)selectionItemPattern).Current.IsSelected
+                    && MatchesListItemName(item, voicebankName));
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (System.Runtime.InteropServices.COMException)
         {
             return false;
         }

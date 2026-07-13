@@ -28,6 +28,8 @@ public sealed record BridgeOptions
 
     public int TimeoutSeconds { get; init; } = 300;
 
+    public int LipSyncLeadMilliseconds { get; init; } = 33;
+
     public string VoicebankName { get; init; } = DefaultVoicebankName;
 
     public VocaloidDriverMode DriverMode { get; init; } = VocaloidDriverMode.Assisted;
@@ -46,6 +48,8 @@ public sealed record BridgeOptions
         ArgumentOutOfRangeException.ThrowIfLessThan(LeadInTicks, 0);
         ArgumentOutOfRangeException.ThrowIfLessThan(TailTicks, 0);
         ArgumentOutOfRangeException.ThrowIfLessThan(TimeoutSeconds, 10);
+        ArgumentOutOfRangeException.ThrowIfLessThan(LipSyncLeadMilliseconds, 0);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(LipSyncLeadMilliseconds, 100);
         ArgumentException.ThrowIfNullOrWhiteSpace(VoicebankName);
         return this;
     }

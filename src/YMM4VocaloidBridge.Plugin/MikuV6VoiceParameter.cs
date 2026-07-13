@@ -13,6 +13,7 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
     private VocaloidDriverMode driverMode = VocaloidDriverMode.Automatic;
     private int tempoBpm = 120;
     private int baseNote = 60;
+    private int lipSyncLeadMilliseconds = 33;
     private int timeoutSeconds = 300;
 
     [Display(Name = "連携モード", Description = "自動操作、またはMIDI読み込みとWAV書き出しを手動で行う補助モード")]
@@ -44,6 +45,16 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
         set => Set(ref baseNote, value);
     }
 
+    [Display(Name = "口パク先行", Description = "口形の切り替えを音声より先行させるミリ秒")]
+    [TextBoxSlider("F0", " ms", 0, 100, Delay = -1)]
+    [Range(0, 100)]
+    [DefaultValue(33)]
+    public int LipSyncLeadMilliseconds
+    {
+        get => lipSyncLeadMilliseconds;
+        set => Set(ref lipSyncLeadMilliseconds, value);
+    }
+
     [Display(Name = "待機時間", Description = "WAV書き出しを待つ最大秒数")]
     [TextBoxSlider("F0", " 秒", 30, 900, Delay = -1)]
     [Range(30, 900)]
@@ -59,6 +70,7 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
         DriverMode = DriverMode,
         TempoBpm = TempoBpm,
         BaseNote = BaseNote,
+        LipSyncLeadMilliseconds = LipSyncLeadMilliseconds,
         TimeoutSeconds = TimeoutSeconds,
     };
 }

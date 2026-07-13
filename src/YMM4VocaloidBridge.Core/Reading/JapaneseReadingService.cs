@@ -11,7 +11,8 @@ public sealed record ReadingSegment(string Surface, string Pronunciation, bool I
 
 public sealed record JapaneseReadingResult(string NormalizedText, IReadOnlyList<ReadingSegment> Segments)
 {
-    public string Pronunciation => string.Concat(Segments.Where(x => !x.IsPunctuation).Select(x => x.Pronunciation));
+    public string Pronunciation => string.Concat(
+        Segments.Select(segment => segment.IsPunctuation ? segment.Surface : segment.Pronunciation));
 }
 
 public sealed class JapaneseReadingService

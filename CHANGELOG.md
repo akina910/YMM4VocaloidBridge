@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Preserve punctuation across YMM4's custom-reading round trip so pauses and question endings reach synthesis.
+- Analyze rendered WAVE activity, reject silent output, align native YMM4 vowel frames, and expose a configurable lip-sync lead.
+- Add question-ending and sokuon-aware dialogue prosody rules.
+- Add moving-standing-image setup instructions and stronger package provenance/boundary checks.
+
+### Changed
+
+- Require a verifiable HATSUNE MIKU V6 ORIGINAL selection during automatic project setup or MIDI import.
+- Remove release debug paths and force clean, source-revision-stamped packaging.
+
 All notable changes to this project are documented in this file.
 
 ## 0.1.0-beta.2 - 2026-07-13

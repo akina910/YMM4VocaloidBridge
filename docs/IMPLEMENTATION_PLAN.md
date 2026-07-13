@@ -1,10 +1,10 @@
 # Implementation Plan
 
-Status: **Implementation active; M0 exit gate passed**
+Status: **Implementation and verification active; do not claim complete until every exit gate has evidence**
 
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
-この文書は実装の基準計画です。Phase 0のゲートは2026-07-10に実機検証で通過しました。証跡と採用判断は[M0 Feasibility Evidence](M0_FEASIBILITY_EVIDENCE.md)に記録しています。
+この文書は実装の基準計画です。Phase 0のゲートは2026-07-10に実機検証で通過しました。証跡と採用判断は[M0 Feasibility Evidence](M0_FEASIBILITY_EVIDENCE.md)に記録しています。コード実装、単体テスト、DLL契約テストだけではPhase 4/5完了としません。実YMM4の音声アイテムとユーザー所有立ち絵を通したプレビュー証跡が必要です。
 
 ## 1. Product Goal
 

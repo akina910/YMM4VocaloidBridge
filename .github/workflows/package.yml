@@ -56,7 +56,7 @@ jobs:
       - name: Create package
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.1" }
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.3" }
           ./tools/build-package.ps1 -Version $version -Ymm4DirPath (Resolve-Path .ymm4).Path
 
       - name: Verify package boundary
@@ -65,14 +65,48 @@ jobs:
           $package = Get-ChildItem artifacts/*.ymme | Select-Object -First 1
           Copy-Item $package.FullName package.zip
           Expand-Archive package.zip -DestinationPath package-check
-          $forbidden = Get-ChildItem package-check -Recurse -File | Where-Object {
-            $_.Name -match "YukkuriMovieMaker\.|VOCALOID|HATSUNE_MIKU" -and
-            $_.Name -notmatch "YMM4VocaloidBridge"
+          ./tools/verify-package-boundary.ps1 -PackageRoot package-check
+
+          $revision = git rev-parse HEAD
+          $binaries = Get-ChildItem package-check -Recurse -File | Where-Object {
+            $_.Name -like "YMM4VocaloidBridge.*.dll" -or
+            $_.Name -eq "YMM4VocaloidBridge.Cli.exe"
           }
-          if ($forbidden) { throw "Package includes a forbidden product file: $($forbidden.FullName -join ', ')" }
+          foreach ($binary in $binaries) {
+            $productVersion = $binary.VersionInfo.ProductVersion
+            if ($productVersion -notlike "*$revision*") {
+              throw "Package binary revision mismatch: $($binary.Name) = $productVersion, expected $revision"
+            }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
           name: YMM4VocaloidBridge-ymme
           path: artifacts/*.ymme
           if-no-files-found: error
+
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: YMM4VocaloidBridge-ymme
+          path: artifacts
+
+      - name: Publish verified tag asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $package = Get-ChildItem artifacts/*.ymme | Select-Object -First 1
+          $tag = $env:GITHUB_REF_NAME
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --prerelease --generate-notes --title "YMM4VocaloidBridge $tag"
+          }
+          gh release upload $tag $package.FullName --clobber

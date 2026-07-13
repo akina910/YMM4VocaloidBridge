@@ -2,7 +2,9 @@
 
 Date: 2026-07-13
 
-Status: **PASS for beta compatibility target**
+Status: **PARTIAL — core automatic render passed; full YMM4 standing-image workflow is not yet complete**
+
+The evidence below proves the original beta automatic-render path and public YMM4 DLL contract. It does not prove installation, voice-item creation, and moving-standing-image preview inside the YMM4 executable. The beta.3 completion-gate changes also require a new ORIGINAL run because they alter punctuation handling, prosody, voicebank verification, rendered-WAVE validation, and lip-sync timing.
 
 ## Environment
 
