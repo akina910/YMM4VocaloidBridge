@@ -118,6 +118,12 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             mainWindow,
             request.Options.VoicebankName,
             cancellationToken);
+        events.Add("stage:refresh-editor-window");
+        mainWindow = WaitUntil(
+            () => FindProcessWindow(process.Id, Id.MainWindow),
+            TimeSpan.FromSeconds(15),
+            cancellationToken,
+            "VOCALOID6 editor window after project setup");
         events.Add("stage:import-midi");
         var importVoicebankSelected = ImportMidi(
             mainWindow,
