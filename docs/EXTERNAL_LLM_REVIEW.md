@@ -40,8 +40,8 @@ The staged beta.3 completion-gate patch was reviewed again after the earlier rel
 
 | Reviewer | Result |
 | --- | --- |
-| GitHub Copilot CLI 1.0.70 | Completed chunked diff reviews. Initial P1/P2 findings were fixed; final focused reviews found no remaining P0/P1 in audio/cache or release provenance. Follow-up automation and boundary findings were also addressed locally and revalidated. |
-| Claude Code 2.1.139 / Sonnet | **BLOCKED**: authenticated, but both the repository review (5 minutes) and tools-disabled diff review (4 minutes) timed out without a verdict. |
+| GitHub Copilot | Reviewed the complete pull-request change set. Its package-scanner memory finding was fixed and revalidated. A later `TimeSpan` compile comment was disproved by the language operator and passing Windows build. |
+| Claude Code 2.1.139 / Sonnet | Completed a full branch review, found two medium and two low UI-automation risks, and confirmed after commit `153e30d` that all four were addressed with no new actionable regression. |
 | Gemini CLI 0.43.0 | **BLOCKED**: `UNSUPPORTED_CLIENT` / `IneligibleTierError`; no review verdict was produced. |
 
 Copilot findings addressed in this patch include:
@@ -57,4 +57,4 @@ Copilot findings addressed in this patch include:
 - scan packaged binaries for narrow and UTF-16LE secrets/absolute user paths;
 - require a clean worktree, matching RID clean, embedded source revision, and CI revision checks for plugin DLLs and the CLI executable.
 
-This review evidence does not replace the remaining real YMM4 standing-image preview and ORIGINAL soak gates. Until those run, the product-level result remains **BLOCKED**, not PASS.
+The Claude findings fixed the imported-track selector timeout, restricted update-prompt dismissal to identified update UI, restored explicit combo collapse, and guarded cursor restoration. The final package then passed an ORIGINAL automatic render with no assisted fallback, and the real YMM4 executable restored 15 native lip-sync frames from cache. See [End-to-End Evidence](E2E_EVIDENCE.md).

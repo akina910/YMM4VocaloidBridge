@@ -1,10 +1,10 @@
 # Implementation Plan
 
-Status: **Implementation and verification active; do not claim complete until every exit gate has evidence**
+Status: **Public-beta implementation and supported-environment verification complete**
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
-この文書は実装の基準計画です。Phase 0のゲートは2026-07-10に実機検証で通過しました。証跡と採用判断は[M0 Feasibility Evidence](M0_FEASIBILITY_EVIDENCE.md)に記録しています。コード実装、単体テスト、DLL契約テストだけではPhase 4/5完了としません。実YMM4の音声アイテムとユーザー所有立ち絵を通したプレビュー証跡が必要です。
+この文書は実装の基準計画です。Phase 0のゲートは2026-07-10、Phase 1から5の対応環境ゲートは2026-07-14に実機検証で通過しました。最終証跡は[M0 Feasibility Evidence](M0_FEASIBILITY_EVIDENCE.md)と[End-to-End Evidence](E2E_EVIDENCE.md)に記録しています。実YMM4の音声アイテムからORIGINAL音声、YMM4ネイティブ口パクフレーム、キャッシュ再利用まで確認済みです。ユーザー所有の立ち絵素材そのものは配布・複製しません。
 
 ## 1. Product Goal
 

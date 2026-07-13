@@ -1,14 +1,17 @@
 # End-to-End Evidence
 
-Date: 2026-07-13
+Date: 2026-07-14
 
-Status: **PARTIAL — core automatic render passed; full YMM4 standing-image workflow is not yet complete**
+Status: **PASS for the supported public-beta environment**
 
-The evidence below proves the original beta automatic-render path and public YMM4 DLL contract. It does not prove installation, voice-item creation, and moving-standing-image preview inside the YMM4 executable. The beta.3 completion-gate changes also require a new ORIGINAL run because they alter punctuation handling, prosody, voicebank verification, rendered-WAVE validation, and lip-sync timing.
+This evidence covers the packaged plugin at source revision
+`153e30d48190ded7657f366103c272207910c5c2`. The release gate uses only the
+user-installed `HATSUNE_MIKU_V6_ORIGINAL` voicebank. No SOFT voicebank,
+voicebank files, character images, or authentication data are release inputs.
 
 ## Environment
 
-| Component | Version |
+| Component | Verified version |
 | --- | --- |
 | Windows 11 | build 26200 |
 | .NET SDK | 10.0.301 |
@@ -16,66 +19,82 @@ The evidence below proves the original beta automatic-render path and public YMM
 | VOCALOID6 Editor | 6.12.0.1, Japanese UI |
 | HATSUNE MIKU V6 | 6.12.0, `HATSUNE_MIKU_V6_ORIGINAL` |
 
-## HATSUNE MIKU V6 ORIGINAL verification
+## Final packaged automatic render
 
-One short Japanese dialogue (`初音ミクです。よろしくお願いします。`) was rendered through the complete automatic path with `HATSUNE_MIKU_V6_ORIGINAL` explicitly selected.
-
-Result: **passed in 20.4 seconds with no assisted fallback**.
-
-| Measurement | Result |
-| --- | --- |
-| Output size | 923,388 bytes |
-| Format | RIFF/WAVE PCM, stereo, 44.1 kHz |
-| SHA-256 | `5840963892DDEAA36822E05F764C6CAFDCF4381AC175920D6D1AB32625670A30` |
-
-The run also verified automatic dismissal of VOCALOID6's optional update prompt, the child-text based `NEW PROJECT` control, the child-text based ORIGINAL voicebank entry, MIDI import, Solo isolation, Audio Mixdown, Solo restoration, and final WAVE validation.
-
-## Automatic render soak baseline
-
-Before the ORIGINAL target was fixed, twenty different short Japanese dialogues were rendered consecutively through the complete automatic path with `HATSUNE_MIKU_V6_SOFT`. This is retained as an automation stability baseline, not as ORIGINAL voicebank evidence:
-
-1. Kuromoji reading and mora generation
-2. deterministic dialogue note planning
-3. Type 1 Standard MIDI with UTF-8 lyrics
-4. VOCALOID6 MIDI import and VOCALOID:AI mapping
-5. latest bridge track Solo isolation
-6. Audio Mixdown to the requested absolute path
-7. Solo restoration and PCM WAV validation
-
-Result: **20/20 passed, 100%, no assisted fallback**. The run took 849.9 seconds. The M3 threshold was at least 95% over 20 consecutive cases.
+The CLI embedded in the final `.ymme` rendered the dialogue
+`外部レビュー修正後の初音ミクです。自動生成を確認するね！` through
+VOCALOID6 automatic mode.
 
 | Measurement | Result |
 | --- | --- |
-| Validated WAV count | 20 |
-| Minimum size | 430,020 bytes |
-| Maximum size | 658,788 bytes |
-| Total size | 10,496,688 bytes |
-| Quietest peak | -3.8 dB |
-| Loudest peak | 0.0 dB |
-| First WAV SHA-256 | `1A6FCF9B829F95A0154EDFAC5F40847DECD744FC3369564A851C0600BF6ECD59` |
-| Last WAV SHA-256 | `A24177588FF2ACD1DFEE1C2A9FBE94D20E563020E3105A1AE4A4FA340823B570` |
+| Driver | `Vocaloid6AutomationDriver` |
+| Assisted fallback | `false` |
+| Output size | 1,628,988 bytes |
+| Format | PCM signed 16-bit, stereo, 44.1 kHz |
+| Duration | 9.234376 seconds |
+| Mean / maximum level | -21.9 dB / -4.3 dB |
+| SHA-256 | `6CDD931592DAD29441326D800CDDD7646588BF9F6439D91E18F92DC1CAEDC109` |
 
-FFmpeg `volumedetect` confirmed that all 20 outputs were non-silent. Generated WAV, MIDI, LAB, and VOCALOID project data are excluded from Git and are not release assets.
+The run exercised the dedicated bridge project, MIDI import, explicit ORIGINAL
+selection, optional style confirmation, bridge-track Solo isolation, Audio
+Mixdown, Solo restoration, stable-file waiting, and RIFF/PCM validation.
 
-## Lip sync
+## Real YMM4 plugin path
 
-Thirty short Japanese dialogues are covered by a deterministic unit test. Each sequence starts and ends with a closed mouth, contains at least one vowel mouth shape, and produces identical notes and mouth frames on repeated runs. The YMM4 adapter maps these frames to public `YukkuriMovieMaker.Commons.LipSyncFrame` values.
+The final package was installed into YMM4's user plugin directory. The loaded
+plugin DLL reports product version
+`0.1.0-beta.3+153e30d48190ded7657f366103c272207910c5c2`.
 
-## YMM4 plugin contract
+The real YMM4 4.54.0.1 executable opened `user/debug-integration.ymmp`, loaded a
+voice item whose API is `YMM4VocaloidBridge.Vocaloid6`, and restored the
+generated audio through the plugin cache. The bridge emitted:
 
-The Release plugin was loaded in-process with the official YMM4 4.54.0.1 assemblies. The contract smoke test passed for plugin discovery metadata, the single HATSUNE MIKU V6 speaker, voice parameter creation, Japanese reading conversion, native YMM4 lip-sync frames, and pronounce cloning. The package doctor also reported YMM4 4.54.0.1, VOCALOID6 6.12.0.1, and HATSUNE MIKU V6 6.12.0 as ready.
+- `lip-sync-aligned`: 15 native YMM4 lip-sync frames
+- active audio: 230 ms through 7,220 ms
+- output duration: 7,234.3764 ms
+- visual lead: 33 ms
+- `cache-hit`: 15 frames restored without another VOCALOID render
 
-This contract test does not open the downloaded YMM4 executable. Final confirmation that the voice appears in YMM4's in-app plugin list remains a first-launch verification step.
+The earlier uncached run of the same item emitted `render-complete` with
+`driver=Vocaloid6AutomationDriver`, `UsedFallback=false`, 12 notes, 15 frames,
+and editor version `6.12.0.1`.
 
-## Failure and recovery
+These are public `YukkuriMovieMaker.Commons.LipSyncFrame` values, so any
+compatible user-owned moving standing-image asset selected for that character
+receives the normal YMM4 mouth animation. The project deliberately does not
+bundle or copy such an asset; selecting one is user content configuration, not
+part of the plugin package.
 
-- An unavailable or renamed UI element raises `VocaloidAutomationException` with the failed stage information.
-- Automatic failure opens the assisted guide and waits for the same requested WAV path.
-- Stale Windows file dialogs are dismissed at the next automatic request.
-- The known optional VOCALOID6 update prompt is declined without changing update settings.
-- A named non-bridge track prevents automatic modification and triggers assisted fallback.
-- WAV files are accepted only after their size stabilizes and their RIFF/PCM structure is valid.
+## Package and automated verification
 
-## Remaining beta matrix
+| Gate | Result |
+| --- | --- |
+| Unit tests | 29/29 passed |
+| Full Release build | Passed, 0 warnings, 0 errors |
+| Package boundary | Passed, 20 allow-listed files |
+| GitHub Actions CI | `build-and-test` passed |
+| GitHub Actions package | `package` passed |
+| Final package SHA-256 | `F718864344DD82DEA36DD3CC1EA8D8E84796E7BF4D263BF7732A883709936885` |
 
-The compatibility target above is verified at the machine's active display scaling. Additional YMM4/VOCALOID6 versions, UI languages, and DPI settings remain community test targets and must not be described as supported until evidence is added.
+The package contains no YMM4 assemblies, VOCALOID binaries, voicebanks,
+character images, credentials, generated WAV files, MIDI files, or local user
+paths.
+
+## Independent review
+
+GitHub Copilot reviewed the pull request and found a package-scanner memory
+issue, which was fixed. Claude Code 2.1.139 reviewed the complete branch, found
+two UI-automation correctness risks, and then reviewed commit `153e30d` after
+the fixes. Its follow-up result was: all four reported points addressed and no
+new actionable regressions.
+
+Gemini CLI 0.43.0 was attempted but returned `UNSUPPORTED_CLIENT` /
+`IneligibleTierError`. It is recorded as blocked and is not counted as passing
+review evidence.
+
+## Compatibility boundary
+
+The supported beta evidence is the exact environment listed above at the
+machine's active display scaling. Other YMM4/VOCALOID6 versions, UI languages,
+and DPI settings remain community compatibility targets rather than verified
+support claims.
