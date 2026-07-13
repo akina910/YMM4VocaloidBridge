@@ -21,6 +21,7 @@ jobs:
     env:
       YMM4_VERSION: 4.54.0.1
       YMM4_URL: https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.54.0.1/YukkuriMovieMaker_v4.54.0.1.zip
+      YMM4_DIR: ${{ runner.temp }}\ymm4-v4.54.0.1
     steps:
       - uses: actions/checkout@v4
 
@@ -31,33 +32,34 @@ jobs:
       - uses: actions/cache@v4
         id: ymm4-cache
         with:
-          path: .ymm4
+          path: ${{ env.YMM4_DIR }}
           key: ymm4-${{ runner.os }}-${{ env.YMM4_VERSION }}
 
       - name: Download official YMM4 compatibility target
         if: steps.ymm4-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path .ymm4 -Force | Out-Null
-          Invoke-WebRequest $env:YMM4_URL -OutFile ymm4.zip
-          Expand-Archive ymm4.zip -DestinationPath .ymm4
+          $archive = Join-Path $env:RUNNER_TEMP "YukkuriMovieMaker.zip"
+          New-Item -ItemType Directory -Path $env:YMM4_DIR -Force | Out-Null
+          Invoke-WebRequest $env:YMM4_URL -OutFile $archive
+          Expand-Archive $archive -DestinationPath $env:YMM4_DIR
 
       - name: Build and test plugin against YMM4
         shell: pwsh
         run: |
           dotnet build src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj `
-            -c Release "-p:YMM4DirPath=$((Resolve-Path .ymm4).Path)"
+            -c Release "-p:YMM4DirPath=$env:YMM4_DIR"
           dotnet test tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj -c Release
           dotnet run --project tests/YMM4VocaloidBridge.PluginSmoke/YMM4VocaloidBridge.PluginSmoke.csproj `
             -c Release -- `
             (Resolve-Path src/YMM4VocaloidBridge.Plugin/bin/Release/net10.0-windows10.0.19041.0).Path `
-            (Resolve-Path .ymm4).Path
+            $env:YMM4_DIR
 
       - name: Create package
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.3" }
-          ./tools/build-package.ps1 -Version $version -Ymm4DirPath (Resolve-Path .ymm4).Path
+          ./tools/build-package.ps1 -Version $version -Ymm4DirPath $env:YMM4_DIR
 
       - name: Verify package boundary
         shell: pwsh
