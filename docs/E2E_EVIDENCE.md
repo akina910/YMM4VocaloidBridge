@@ -72,20 +72,53 @@ These remaining consonant and proper-name errors are recorded rather than
 reported as a pass. The generated samples must be listened to in the installed
 YMM4 flow before beta.4 can be called complete.
 
+## Packaged YMM4 verification
+
+The clean source commit `22bab9f5d0ff25619deb56a1ff3ebfef17751d94` was
+packaged as `0.1.0-beta.4`. Both the installed plugin and bundled self-contained
+CLI report that revision in `ProductVersion`. The bundled doctor reported
+`ready: true` for YMM4 4.54.0.1, VOCALOID6 Editor 6.12.0.1, and HATSUNE MIKU V6
+6.12.0.
+
+The real YMM4 project rendered `こんにちは、初音ミクです。` through the installed
+plugin with no assisted fallback:
+
+| Measurement | Result |
+| --- | --- |
+| Driver | `Vocaloid6AutomationDriver` |
+| Assisted fallback | `false` |
+| Sequence / lip sync | 12 notes / 15 native YMM4 frames |
+| Active audio | 110 ms through 2,125.0113 ms |
+| Format | PCM signed 16-bit, stereo, 44.1 kHz |
+| Output size | 374,896 bytes |
+| SHA-256 | `2AE76DFBAA2025585FD29E9F0705DF53934DBB462E43E5885CD1E5B316C94455` |
+| Whisper medium | `こんやちははずね肉です` |
+
+After restarting YMM4 with the same project, the beta.4 cache restored the same
+audio and all 15 lip-sync frames without another VOCALOID6 render. YMM4 was left
+open and responsive; the bridge-owned VOCALOID6 project was closed afterward.
+
+The package contains 20 allow-listed files and no YMM4 assemblies, VOCALOID
+binaries, voicebanks, images, credentials, generated audio, MIDI, or local user
+paths. Package size is 78,771,860 bytes and SHA-256 is
+`3F5EF2AFF18922A441A3C0421986A1ACFCDE5851457874C71E2F355F1FFCBDD3`.
+
 ## Current automated evidence
 
 | Gate | Result |
 | --- | --- |
 | Unit tests | 30/30 passed |
 | Full Release build | Passed, 0 warnings, 0 errors |
+| Package boundary | Passed, 20/20 files allow-listed |
+| Installed YMM4 automatic render | Passed mechanically, no assisted fallback |
+| YMM4 restart/cache/lip sync | Passed, 15 frames restored |
 | Distinct Take outputs | 10/10 unique SHA-256 values |
 | Silent-output rejection | Passed in unit tests and real driver path |
 | Claude Sonnet beta.4 review | No high- or medium-severity actionable finding |
 | Gemini CLI | Blocked by `UNSUPPORTED_CLIENT`; not counted as passing |
 
-The beta.4 package revision, package hash, installed YMM4 render, cache reuse,
-and final listener verdict are intentionally left pending until the clean
-source commit is packaged and installed.
+The final listener verdict remains intentionally pending. Mechanical rendering
+and ASR evidence are not a substitute for the user's quality acceptance.
 
 ## Compatibility boundary
 
