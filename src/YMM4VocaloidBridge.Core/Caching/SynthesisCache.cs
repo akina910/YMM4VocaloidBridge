@@ -8,7 +8,7 @@ namespace YMM4VocaloidBridge.Core.Caching;
 
 public static class SynthesisCacheKey
 {
-    private const string SchemaVersion = "ymm4-vocaloid-bridge-cache-v2-wave-aligned-prosody";
+    private const string SchemaVersion = "ymm4-vocaloid-bridge-cache-v4-take10-dialogue-quality";
 
     public static string Create(string normalizedText, BridgeOptions options, string vocaloidVersion)
     {

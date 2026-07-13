@@ -43,7 +43,7 @@ Add `--ui` to open the desktop diagnostic window:
 
 ## First render
 
-The default `Automatic` mode imports the generated lyric MIDI, selects `HATSUNE_MIKU_V6_ORIGINAL`, and requests Audio Mixdown through VOCALOID6. If a supported UI element is unavailable, the same request falls back to `Assisted` without discarding its MIDI.
+The default `Automatic` mode imports the generated lyric MIDI, selects `HATSUNE_MIKU_V6_ORIGINAL`, applies the verified `Take10` timing candidate, and requests Audio Mixdown through VOCALOID6. If a supported UI element is unavailable, the same request falls back to `Assisted` without discarding its MIDI.
 
 In `Assisted`, import the listed MIDI, select `HATSUNE_MIKU_V6_ORIGINAL`, then use Audio Mixdown to save the WAV to the exact listed path. YMM4 resumes when the validated WAV appears.
 

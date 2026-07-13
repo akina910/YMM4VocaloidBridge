@@ -10,27 +10,37 @@ public sealed record BridgeOptions
 {
     public const int TicksPerQuarterNote = 480;
 
+    public const int DefaultTempoBpm = 130;
+
     public const string DefaultVoicebankName = "HATSUNE_MIKU_V6_ORIGINAL";
 
-    public int TempoBpm { get; init; } = 120;
+    public const string DefaultVoiceStyleName = "No Effect";
+
+    public const int DefaultVoiceTakeNumber = 10;
+
+    public int TempoBpm { get; init; } = DefaultTempoBpm;
 
     public int BaseNote { get; init; } = 60;
 
-    public int Velocity { get; init; } = 96;
+    public int Velocity { get; init; } = 88;
 
-    public int MoraTicks { get; init; } = 240;
+    public int MoraTicks { get; init; } = 160;
 
-    public int NoteGapTicks { get; init; } = 15;
+    public int NoteGapTicks { get; init; } = 0;
 
-    public int LeadInTicks { get; init; } = 240;
+    public int LeadInTicks { get; init; } = 120;
 
-    public int TailTicks { get; init; } = 480;
+    public int TailTicks { get; init; } = 240;
 
     public int TimeoutSeconds { get; init; } = 300;
 
     public int LipSyncLeadMilliseconds { get; init; } = 33;
 
     public string VoicebankName { get; init; } = DefaultVoicebankName;
+
+    public string VoiceStyleName { get; init; } = DefaultVoiceStyleName;
+
+    public int VoiceTakeNumber { get; init; } = DefaultVoiceTakeNumber;
 
     public VocaloidDriverMode DriverMode { get; init; } = VocaloidDriverMode.Assisted;
 
@@ -51,6 +61,9 @@ public sealed record BridgeOptions
         ArgumentOutOfRangeException.ThrowIfLessThan(LipSyncLeadMilliseconds, 0);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(LipSyncLeadMilliseconds, 100);
         ArgumentException.ThrowIfNullOrWhiteSpace(VoicebankName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(VoiceStyleName);
+        ArgumentOutOfRangeException.ThrowIfLessThan(VoiceTakeNumber, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(VoiceTakeNumber, 10);
         return this;
     }
 }

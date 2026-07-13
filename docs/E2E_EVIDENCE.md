@@ -2,12 +2,17 @@
 
 Date: 2026-07-14
 
-Status: **PASS for the supported public-beta environment**
+Status: **beta.3 superseded; beta.4 listener acceptance pending**
 
-This evidence covers the packaged plugin at source revision
-`153e30d48190ded7657f366103c272207910c5c2`. The release gate uses only the
-user-installed `HATSUNE_MIKU_V6_ORIGINAL` voicebank. No SOFT voicebank,
-voicebank files, character images, or authentication data are release inputs.
+The earlier beta.3 `PASS` claim covered plugin loading, automatic WAVE generation,
+cache reuse, and native YMM4 lip-sync frames, but did not require an
+intelligibility or listening gate. That completion claim is withdrawn. This
+document records the beta.4 quality rework without treating file creation as
+proof that the voice is usable.
+
+No test or package input contains a VOCALOID voicebank, character image,
+credential, or authentication data. All renders use the user's installed
+`HATSUNE_MIKU_V6_ORIGINAL` voicebank.
 
 ## Environment
 
@@ -18,83 +23,72 @@ voicebank files, character images, or authentication data are release inputs.
 | YMM4 | 4.54.0.1 |
 | VOCALOID6 Editor | 6.12.0.1, Japanese UI |
 | HATSUNE MIKU V6 | 6.12.0, `HATSUNE_MIKU_V6_ORIGINAL` |
+| ASR audit | Whisper medium, Japanese |
 
-## Final packaged automatic render
+## beta.4 defects reproduced and fixed
 
-The CLI embedded in the final `.ymme` rendered the dialogue
-`外部レビュー修正後の初音ミクです。自動生成を確認するね！` through
-VOCALOID6 automatic mode.
+- The beta.3 planner used a periodic pitch pattern, four mora per second, and a
+  gap after every note. It sounded sung and segmented rather than conversational.
+- VOCALOID6 could accumulate imported bridge parts across requests, allowing a
+  previous request to affect a later export.
+- A pointer click reported style-selection success while the actual selected
+  item remained `No Effect*`.
+- One structurally valid 3.923-second WAVE contained only approximately -91 dB
+  signal. The old CLI accepted it because it checked RIFF structure, not speech
+  activity.
 
-| Measurement | Result |
-| --- | --- |
-| Driver | `Vocaloid6AutomationDriver` |
-| Assisted fallback | `false` |
-| Output size | 1,628,988 bytes |
-| Format | PCM signed 16-bit, stereo, 44.1 kHz |
-| Duration | 9.234376 seconds |
-| Mean / maximum level | -21.9 dB / -4.3 dB |
-| SHA-256 | `6CDD931592DAD29441326D800CDDD7646588BF9F6439D91E18F92DC1CAEDC109` |
+The driver now verifies bridge-project ownership, starts each render from a
+fresh project, preserves the imported ORIGINAL style, verifies custom style and
+Take selections through `SelectionItemPattern`, and rejects silent or
+below-floor audio before returning success.
 
-The run exercised the dedicated bridge project, MIDI import, explicit ORIGINAL
-selection, optional style confirmation, bridge-track Solo isolation, Audio
-Mixdown, Solo restoration, stable-file waiting, and RIFF/PCM validation.
+## Intelligibility audit
 
-## Real YMM4 plugin path
+The final candidate uses 130 BPM, 160 ticks per mora, connected notes, flat
+statement pitch, a one-semitone question ending, a closed-mouth timing gap for
+sokuon, and VOCALOID:AI `Take10`.
 
-The final package was installed into YMM4's user plugin directory. The loaded
-plugin DLL reports product version
-`0.1.0-beta.3+153e30d48190ded7657f366103c272207910c5c2`.
+Ten separate real VOCALOID6 renders of the same difficult sentence were made,
+one for each Take. Takes 1 through 9 were recognized as
+`ま、ではもう一度ゆっくり確認します`. Take 10 alone was recognized exactly:
 
-The real YMM4 4.54.0.1 executable opened `user/debug-integration.ymmp`, loaded a
-voice item whose API is `YMM4VocaloidBridge.Vocaloid6`, and restored the
-generated audio through the plugin cache. The bridge emitted:
+```text
+Expected: 待って、もう一度ゆっくり確認します。
+Take10:   待って、もう一度ゆっくり確認します
+```
 
-- `lip-sync-aligned`: 15 native YMM4 lip-sync frames
-- active audio: 230 ms through 7,220 ms
-- output duration: 7,234.3764 ms
-- visual lead: 33 ms
-- `cache-hit`: 15 frames restored without another VOCALOID render
+Cross-sentence checks found that Take 10 is an improvement, not a complete TTS
+substitute:
 
-The earlier uncached run of the same item emitted `render-complete` with
-`driver=Vocaloid6AutomationDriver`, `UsedFallback=false`, 12 notes, 15 frames,
-and editor version `6.12.0.1`.
+```text
+Expected: 本当にこれで大丈夫？うん、ちゃんと聞こえているよ。
+ASR:      本当は鬼これて大丈夫 / うん、ちゃんと聞こえているよ
 
-These are public `YukkuriMovieMaker.Commons.LipSyncFrame` values, so any
-compatible user-owned moving standing-image asset selected for that character
-receives the normal YMM4 mouth animation. The project deliberately does not
-bundle or copy such an asset; selecting one is user content configuration, not
-part of the plugin package.
+Expected: こんにちは、初音ミクです。今日は一緒に話そうね？
+ASR:      こんやちははずねみくです / 今日は一緒に話そうね
+```
 
-## Package and automated verification
+These remaining consonant and proper-name errors are recorded rather than
+reported as a pass. The generated samples must be listened to in the installed
+YMM4 flow before beta.4 can be called complete.
+
+## Current automated evidence
 
 | Gate | Result |
 | --- | --- |
-| Unit tests | 29/29 passed |
+| Unit tests | 30/30 passed |
 | Full Release build | Passed, 0 warnings, 0 errors |
-| Package boundary | Passed, 20 allow-listed files |
-| GitHub Actions CI | `build-and-test` passed |
-| GitHub Actions package | `package` passed |
-| Final package SHA-256 | `F718864344DD82DEA36DD3CC1EA8D8E84796E7BF4D263BF7732A883709936885` |
+| Distinct Take outputs | 10/10 unique SHA-256 values |
+| Silent-output rejection | Passed in unit tests and real driver path |
+| Claude Sonnet beta.4 review | No high- or medium-severity actionable finding |
+| Gemini CLI | Blocked by `UNSUPPORTED_CLIENT`; not counted as passing |
 
-The package contains no YMM4 assemblies, VOCALOID binaries, voicebanks,
-character images, credentials, generated WAV files, MIDI files, or local user
-paths.
-
-## Independent review
-
-GitHub Copilot reviewed the pull request and found a package-scanner memory
-issue, which was fixed. Claude Code 2.1.139 reviewed the complete branch, found
-two UI-automation correctness risks, and then reviewed commit `153e30d` after
-the fixes. Its follow-up result was: all four reported points addressed and no
-new actionable regressions.
-
-Gemini CLI 0.43.0 was attempted but returned `UNSUPPORTED_CLIENT` /
-`IneligibleTierError`. It is recorded as blocked and is not counted as passing
-review evidence.
+The beta.4 package revision, package hash, installed YMM4 render, cache reuse,
+and final listener verdict are intentionally left pending until the clean
+source commit is packaged and installed.
 
 ## Compatibility boundary
 
-The supported beta evidence is the exact environment listed above at the
-machine's active display scaling. Other YMM4/VOCALOID6 versions, UI languages,
-and DPI settings remain community compatibility targets rather than verified
-support claims.
+Evidence applies only to the exact environment above at the machine's active
+display scaling. Other YMM4 or VOCALOID6 versions, UI languages, and DPI values
+remain community compatibility targets.

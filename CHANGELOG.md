@@ -8,11 +8,27 @@
 - Analyze rendered WAVE activity, reject silent output, align native YMM4 vowel frames, and expose a configurable lip-sync lead.
 - Add question-ending and sokuon-aware dialogue prosody rules.
 - Add moving-standing-image setup instructions and stronger package provenance/boundary checks.
+- Expose VOCALOID:AI Take 1 through 10 and default to Take 10 after a real ten-take intelligibility comparison.
+- Persist CLI automation failures locally while redacting dialogue passed through `--text`.
 
 ### Changed
 
 - Require a verifiable HATSUNE MIKU V6 ORIGINAL selection during automatic project setup or MIDI import.
 - Remove release debug paths and force clean, source-revision-stamped packaging.
+- Replace the periodic melody with connected, flat statement notes and a one-semitone question ending.
+- Represent sokuon as a closed-mouth timing gap instead of asking VOCALOID6 to sing an independent `ッ` note.
+- Preserve the imported ORIGINAL style instead of reapplying a style preset to the generated track.
+- Restart only a verified bridge-owned VOCALOID6 project before each render so prior parts cannot leak into later dialogue.
+
+### Fixed
+
+- Reject silent automatic renders instead of treating a structurally valid WAVE file as successful output.
+- Select custom styles and takes through UI Automation selection patterns and verify the resulting selection.
+- Dismiss only identified update and session-recovery prompts, and never close a project containing a named non-bridge track.
+
+### Known limitations
+
+- Speech prosody is deterministic and intentionally restrained; VOCALOID6 remains a singing engine rather than a dedicated TTS engine.
 
 All notable changes to this project are documented in this file.
 
@@ -61,5 +77,4 @@ All notable changes to this project are documented in this file.
 
 - Initial compatibility target is Windows 11, Japanese VOCALOID6 6.12, HATSUNE MIKU V6, and current YMM4.
 - Automatic mode requires a dedicated VOCALOID6 bridge project. A project with a named non-bridge track falls back to assisted mode.
-- Imported bridge tracks remain in the unsaved VOCALOID6 project during a batch. Restart VOCALOID6 without saving to clear them.
 - Speech prosody is deterministic and intentionally simple in this beta.

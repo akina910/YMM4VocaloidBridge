@@ -58,3 +58,9 @@ Copilot findings addressed in this patch include:
 - require a clean worktree, matching RID clean, embedded source revision, and CI revision checks for plugin DLLs and the CLI executable.
 
 The Claude findings fixed the imported-track selector timeout, restricted update-prompt dismissal to identified update UI, restored explicit combo collapse, and guarded cursor restoration. The final package then passed an ORIGINAL automatic render with no assisted fallback, and the real YMM4 executable restored 15 native lip-sync frames from cache. See [End-to-End Evidence](E2E_EVIDENCE.md).
+
+## beta.4 quality review (2026-07-14)
+
+The beta.3 completion claim was withdrawn after intelligibility was found to be outside the acceptance gate. Claude Sonnet reviewed the complete beta.4 diff after the quality rework. The review covered bridge-project ownership, clean-session restart, session-recovery handling, exact style/take selection, silent-WAVE rejection, cache invalidation, sokuon timing, lip sync, and CLI dialogue redaction.
+
+Claude reported no high- or medium-severity actionable issue. Its observations were checked against the source: the Japanese recovery labels are valid UTF-8, `WaveAudioAnalyzer.Analyze` rejects unusable audio by exception, and the CLI parser does not support `--text=value`, so the adjacent-value redaction covers accepted syntax. Gemini remains blocked by `UNSUPPORTED_CLIENT` and is not counted as passing evidence. A GitHub Copilot review is required again after the beta.4 commit is pushed.

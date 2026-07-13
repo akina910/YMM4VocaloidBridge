@@ -11,8 +11,9 @@ namespace YMM4VocaloidBridge.Plugin;
 public sealed class MikuV6VoiceParameter : VoiceParameterBase
 {
     private VocaloidDriverMode driverMode = VocaloidDriverMode.Automatic;
-    private int tempoBpm = 120;
+    private int tempoBpm = BridgeOptions.DefaultTempoBpm;
     private int baseNote = 60;
+    private int voiceTakeNumber = BridgeOptions.DefaultVoiceTakeNumber;
     private int lipSyncLeadMilliseconds = 33;
     private int timeoutSeconds = 300;
 
@@ -28,7 +29,7 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
     [Display(Name = "テンポ", Description = "会話シーケンスのテンポ")]
     [TextBoxSlider("F0", " BPM", 60, 240, Delay = -1)]
     [Range(60, 240)]
-    [DefaultValue(120)]
+    [DefaultValue(BridgeOptions.DefaultTempoBpm)]
     public int TempoBpm
     {
         get => tempoBpm;
@@ -43,6 +44,16 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
     {
         get => baseNote;
         set => Set(ref baseNote, value);
+    }
+
+    [Display(Name = "テイク", Description = "VOCALOID:AIの発音タイミング候補")]
+    [TextBoxSlider("F0", "", 1, 10, Delay = -1)]
+    [Range(1, 10)]
+    [DefaultValue(BridgeOptions.DefaultVoiceTakeNumber)]
+    public int VoiceTakeNumber
+    {
+        get => voiceTakeNumber;
+        set => Set(ref voiceTakeNumber, value);
     }
 
     [Display(Name = "口パク先行", Description = "口形の切り替えを音声より先行させるミリ秒")]
@@ -70,6 +81,7 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
         DriverMode = DriverMode,
         TempoBpm = TempoBpm,
         BaseNote = BaseNote,
+        VoiceTakeNumber = VoiceTakeNumber,
         LipSyncLeadMilliseconds = LipSyncLeadMilliseconds,
         TimeoutSeconds = TimeoutSeconds,
     };

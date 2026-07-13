@@ -33,7 +33,38 @@ internal static class BridgeCli
         catch (Exception exception)
         {
             Console.Error.WriteLine($"ERROR: {exception.Message}");
+            WriteDiagnosticLog(args, exception);
             return 1;
+        }
+    }
+
+    private static void WriteDiagnosticLog(IReadOnlyList<string> arguments, Exception exception)
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "YMM4VocaloidBridge");
+            Directory.CreateDirectory(directory);
+            var entry = $"[{DateTimeOffset.Now:O}] command={string.Join(' ', RedactDialogue(arguments))}{Environment.NewLine}"
+                + exception
+                + Environment.NewLine;
+            File.AppendAllText(Path.Combine(directory, "cli-errors.log"), entry);
+        }
+        catch
+        {
+            // Diagnostics must not replace the original CLI failure.
+        }
+    }
+
+    private static IEnumerable<string> RedactDialogue(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            yield return index > 0
+                && string.Equals(arguments[index - 1], "--text", StringComparison.OrdinalIgnoreCase)
+                    ? "<redacted>"
+                    : arguments[index];
         }
     }
 
@@ -178,10 +209,12 @@ internal static class BridgeCli
         return new BridgeOptions
         {
             DriverMode = mode,
-            TempoBpm = arguments.GetInt("tempo", 120),
+            TempoBpm = arguments.GetInt("tempo", BridgeOptions.DefaultTempoBpm),
             BaseNote = arguments.GetInt("base-note", 60),
             TimeoutSeconds = arguments.GetInt("timeout", 300),
             VoicebankName = arguments.GetOptional("voicebank") ?? BridgeOptions.DefaultVoicebankName,
+            VoiceStyleName = arguments.GetOptional("style") ?? BridgeOptions.DefaultVoiceStyleName,
+            VoiceTakeNumber = arguments.GetInt("take", BridgeOptions.DefaultVoiceTakeNumber),
         }.Validate();
     }
 
@@ -201,7 +234,7 @@ internal static class BridgeCli
             inspect-ui [--depth 6] [--menu ファイル]
             inspect-tracks
             generate --text <dialogue> --out-dir <directory> [--tempo 120] [--base-note 60]
-            synthesize --text <dialogue> --output <file.wav> [--mode assisted|automatic] [--no-fallback] [--timeout 300]
+            synthesize --text <dialogue> --output <file.wav> [--mode assisted|automatic] [--take 1-10] [--no-fallback] [--timeout 300]
             """);
     }
 }

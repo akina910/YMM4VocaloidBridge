@@ -17,6 +17,9 @@ public sealed class CorePipelineTests : IDisposable
     public void Default_voicebank_is_miku_v6_original()
     {
         Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", new BridgeOptions().VoicebankName);
+        Assert.Equal(10, new BridgeOptions().VoiceTakeNumber);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 0 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 11 }.Validate());
     }
 
     [Fact]
@@ -51,7 +54,7 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal(first.TempoBpm, second.TempoBpm);
         Assert.Equal(first.TotalTicks, second.TotalTicks);
         Assert.Equal(first.Notes, second.Notes);
-        Assert.Equal(240, first.Notes[0].StartTick);
+        Assert.Equal(120, first.Notes[0].StartTick);
         Assert.Equal("ハ", first.Notes[0].Lyric);
         Assert.All(first.Notes, note => Assert.InRange(note.NoteNumber, 36, 84));
     }
@@ -69,7 +72,7 @@ public sealed class CorePipelineTests : IDisposable
     }
 
     [Fact]
-    public void Dialogue_prosody_raises_questions_and_shortens_sokuon()
+    public void Dialogue_prosody_raises_questions_and_keeps_sokuon_as_silence()
     {
         var service = new JapaneseReadingService();
         var planner = new DialogueSequencePlanner(new MoraTokenizer());
@@ -80,8 +83,35 @@ public sealed class CorePipelineTests : IDisposable
 
         Assert.True(question.Notes[^1].NoteNumber > question.Notes[^2].NoteNumber);
         Assert.True(question.Notes[^1].NoteNumber > statement.Notes[^1].NoteNumber);
-        var sokuonNote = Assert.Single(sokuon.Notes, note => note.Lyric == "ッ");
-        Assert.Equal(options.MoraTicks / 2 - options.NoteGapTicks, sokuonNote.DurationTicks);
+        Assert.DoesNotContain(sokuon.Notes, note => note.Lyric == "ッ");
+        Assert.Equal(2, sokuon.Notes.Count);
+        Assert.Equal(
+            options.MoraTicks,
+            sokuon.Notes[1].StartTick - (sokuon.Notes[0].StartTick + sokuon.Notes[0].DurationTicks));
+    }
+
+    [Fact]
+    public void Dialogue_defaults_use_connected_notes_and_a_speech_like_rate()
+    {
+        var reading = new JapaneseReadingService().Convert("これは自然な会話です");
+        var sequence = new DialogueSequencePlanner(new MoraTokenizer()).Plan(reading, new BridgeOptions());
+        var first = sequence.Notes[0];
+        var last = sequence.Notes[^1];
+        var spokenSeconds = (last.StartTick + last.DurationTicks - first.StartTick)
+            / (double)sequence.TicksPerQuarterNote
+            * 60
+            / sequence.TempoBpm;
+        var moraPerSecond = sequence.Notes.Count / spokenSeconds;
+
+        Assert.InRange(moraPerSecond, 5.5, 8.0);
+        Assert.All(
+            sequence.Notes.Zip(sequence.Notes.Skip(1)),
+            pair =>
+            {
+                Assert.Equal(pair.First.StartTick + pair.First.DurationTicks, pair.Second.StartTick);
+                Assert.InRange(Math.Abs(pair.Second.NoteNumber - pair.First.NoteNumber), 0, 1);
+            });
+        Assert.InRange(sequence.Notes.Max(note => note.NoteNumber) - sequence.Notes.Min(note => note.NoteNumber), 0, 2);
     }
 
     [Fact]
