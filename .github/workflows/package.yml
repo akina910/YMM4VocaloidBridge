@@ -21,7 +21,6 @@ jobs:
     env:
       YMM4_VERSION: 4.54.0.1
       YMM4_URL: https://github.com/manju-summoner/YukkuriMovieMaker4/releases/download/v4.54.0.1/YukkuriMovieMaker_v4.54.0.1.zip
-      YMM4_DIR: ${{ runner.temp }}\ymm4-v4.54.0.1
     steps:
       - uses: actions/checkout@v4
 
@@ -32,34 +31,37 @@ jobs:
       - uses: actions/cache@v4
         id: ymm4-cache
         with:
-          path: ${{ env.YMM4_DIR }}
+          path: ${{ runner.temp }}\ymm4-v4.54.0.1
           key: ymm4-${{ runner.os }}-${{ env.YMM4_VERSION }}
 
       - name: Download official YMM4 compatibility target
         if: steps.ymm4-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
+          $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
           $archive = Join-Path $env:RUNNER_TEMP "YukkuriMovieMaker.zip"
-          New-Item -ItemType Directory -Path $env:YMM4_DIR -Force | Out-Null
+          New-Item -ItemType Directory -Path $ymm4Dir -Force | Out-Null
           Invoke-WebRequest $env:YMM4_URL -OutFile $archive
-          Expand-Archive $archive -DestinationPath $env:YMM4_DIR
+          Expand-Archive $archive -DestinationPath $ymm4Dir
 
       - name: Build and test plugin against YMM4
         shell: pwsh
         run: |
+          $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
           dotnet build src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj `
-            -c Release "-p:YMM4DirPath=$env:YMM4_DIR"
+            -c Release "-p:YMM4DirPath=$ymm4Dir"
           dotnet test tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj -c Release
           dotnet run --project tests/YMM4VocaloidBridge.PluginSmoke/YMM4VocaloidBridge.PluginSmoke.csproj `
             -c Release -- `
             (Resolve-Path src/YMM4VocaloidBridge.Plugin/bin/Release/net10.0-windows10.0.19041.0).Path `
-            $env:YMM4_DIR
+            $ymm4Dir
 
       - name: Create package
         shell: pwsh
         run: |
+          $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
           $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.3" }
-          ./tools/build-package.ps1 -Version $version -Ymm4DirPath $env:YMM4_DIR
+          ./tools/build-package.ps1 -Version $version -Ymm4DirPath $ymm4Dir
 
       - name: Verify package boundary
         shell: pwsh
