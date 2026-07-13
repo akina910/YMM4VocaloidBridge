@@ -52,7 +52,7 @@ $cliPublish = Join-Path $publishRoot "cli"
     -c $Configuration "-p:YMM4DirPath=$Ymm4DirPath"
 if ($LASTEXITCODE -ne 0) { throw "Plugin clean failed." }
 & $dotnet.Source clean (Join-Path $root "src\YMM4VocaloidBridge.Cli\YMM4VocaloidBridge.Cli.csproj") `
-    -c $Configuration -r win-x64
+    -c $Configuration
 if ($LASTEXITCODE -ne 0) { throw "CLI clean failed." }
 & $dotnet.Source publish (Join-Path $root "src\YMM4VocaloidBridge.Plugin\YMM4VocaloidBridge.Plugin.csproj") `
     -c $Configuration -o $pluginPublish --no-self-contained "-p:YMM4DirPath=$Ymm4DirPath" `
