@@ -14,7 +14,7 @@ public sealed record BridgeOptions
 
     public const int DefaultBaseNote = 64;
 
-    public const int DefaultSpeechRatePercent = 100;
+    public const int DefaultSpeechRatePercent = 125;
 
     public const int DefaultMoraTicks = 144;
 

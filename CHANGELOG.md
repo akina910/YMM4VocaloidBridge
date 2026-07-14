@@ -18,6 +18,7 @@
 
 - Make the robot-speech planner the shared default for the standalone CLI and YMM4 plugin.
 - Set the default timing to about 150 ms per mora; a real greeting render is 2.099 seconds instead of the rejected 3.675-second elongated candidate.
+- Raise the default robot-speech rate from 100% to 125% after listener feedback, targeting about 120 ms per mora.
 - Require a verifiable HATSUNE MIKU V6 ORIGINAL selection during automatic project setup or MIDI import.
 - Remove release debug paths and force clean, source-revision-stamped packaging.
 - Replace the periodic melody with connected, flat statement notes and a one-semitone question ending.

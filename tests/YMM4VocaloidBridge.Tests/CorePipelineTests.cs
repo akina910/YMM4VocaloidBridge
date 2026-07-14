@@ -21,7 +21,7 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", options.VoicebankName);
         Assert.Equal(10, options.VoiceTakeNumber);
         Assert.Equal(64, options.BaseNote);
-        Assert.Equal(100, options.SpeechRatePercent);
+        Assert.Equal(125, options.SpeechRatePercent);
         Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 0 }.Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 11 }.Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { SpeechRatePercent = 49 }.Validate());
@@ -143,7 +143,7 @@ public sealed class CorePipelineTests : IDisposable
             * 60
             / sequence.TempoBpm;
         var moraPerSecond = sequence.Notes.Count / spokenSeconds;
-        Assert.InRange(moraPerSecond, 5.5, 7.5);
+        Assert.InRange(moraPerSecond, 7.0, 9.0);
     }
 
     [Fact]

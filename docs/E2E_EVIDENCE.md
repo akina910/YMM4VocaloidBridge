@@ -128,9 +128,15 @@ minimal word-boundary spacing, and only small duration extensions for `ン` and
 | Output size | 370,300 bytes |
 | Default pitch | Fixed MIDI note 64 |
 
-The 3.675011-second candidate is not a release artifact. Unit coverage now
-enforces a default rate of 5.5 to 7.5 sounding mora per second so the elongated
-timing cannot silently return.
+The 3.675011-second candidate is not a release artifact. At that stage, unit
+coverage enforced 5.5 to 7.5 sounding mora per second so the elongated timing
+could not silently return.
+
+Listener feedback then requested a further 1.2x to 1.3x increase. The shared
+default speech rate was raised from 100% to 125%. A fresh automatic VOCALOID6
+render of the same greeting completed without assisted fallback in 1.677075
+seconds (PCM signed 16-bit, stereo, 44.1 kHz, 295,880 bytes). Unit coverage now
+enforces 7.0 to 9.0 sounding mora per second at the default rate.
 
 ## Current automated evidence
 
