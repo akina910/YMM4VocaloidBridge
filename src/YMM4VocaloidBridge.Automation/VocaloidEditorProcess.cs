@@ -4,8 +4,15 @@ namespace YMM4VocaloidBridge.Automation;
 
 public sealed class VocaloidEditorWarmup
 {
-    public bool StartIfNeeded(VocaloidInstallation installation) =>
-        VocaloidEditorProcess.StartIfNeeded(installation.EditorPath);
+    public bool StartIfNeeded(VocaloidInstallation installation)
+    {
+        var started = VocaloidEditorProcess.StartIfNeeded(installation.EditorPath);
+        var process = VocaloidEditorProcess.AttachOrLaunch(installation.EditorPath);
+        _ = VocaloidStartupPromptHandler.WaitAndDismissUnlicensedVoicePrompt(
+            process.Id,
+            TimeSpan.FromSeconds(30));
+        return started;
+    }
 }
 
 internal static class VocaloidEditorProcess

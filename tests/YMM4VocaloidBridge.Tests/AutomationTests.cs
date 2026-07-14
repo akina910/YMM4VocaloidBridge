@@ -26,6 +26,21 @@ public sealed class AutomationTests : IDisposable
     }
 
     [Fact]
+    public void Unlicensed_voice_prompt_requires_all_authorizer_markers()
+    {
+        const string prompt = """
+            下記のVoiceが認証されていません。
+            - NAOKI
+            VOCALOID Authorizer にて認証してください。
+            今すぐ認証しますか？
+            """;
+
+        Assert.True(VocaloidStartupPromptHandler.IsUnlicensedVoicePromptText(prompt));
+        Assert.False(VocaloidStartupPromptHandler.IsUnlicensedVoicePromptText("VOCALOID Authorizer を起動します。"));
+        Assert.False(VocaloidStartupPromptHandler.IsUnlicensedVoicePromptText("今すぐ認証しますか？"));
+    }
+
+    [Fact]
     public async Task File_waiter_accepts_a_wave_after_it_becomes_stable()
     {
         var path = Path.Combine(temporaryDirectory, "ready.wav");

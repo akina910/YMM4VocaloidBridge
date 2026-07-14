@@ -12,8 +12,8 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
 
     private static class Id
     {
-        public const string HomeWindow = "xHomeWindow";
-        public const string MainWindow = "xMainWindow";
+        public const string HomeWindow = VocaloidStartupPromptHandler.HomeWindowAutomationId;
+        public const string MainWindow = VocaloidStartupPromptHandler.MainWindowAutomationId;
         public const string AddTrackDialog = "xAddTrackDlg";
         public const string AiTrackButton = "xAiTrackButton";
         public const string VoiceBankComboBox = "xVoiceBankComboBox";
@@ -138,6 +138,11 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         var mainWindow = WaitUntil(
             () =>
             {
+                if (VocaloidStartupPromptHandler.TryDismissUnlicensedVoicePrompt(process.Id))
+                {
+                    return null;
+                }
+
                 if (DismissUpdatePrompt(process.Id))
                 {
                     return null;
@@ -167,6 +172,11 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             mainWindow = WaitUntil(
                 () =>
                 {
+                    if (VocaloidStartupPromptHandler.TryDismissUnlicensedVoicePrompt(process.Id))
+                    {
+                        return null;
+                    }
+
                     if (DismissSessionRecoveryPrompt(process.Id))
                     {
                         return null;
