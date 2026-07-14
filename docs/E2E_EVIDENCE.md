@@ -103,11 +103,40 @@ binaries, voicebanks, images, credentials, generated audio, MIDI, or local user
 paths. Package size is 78,771,860 bytes and SHA-256 is
 `3F5EF2AFF18922A441A3C0421986A1ACFCDE5851457874C71E2F355F1FFCBDD3`.
 
+## beta.5 robot-speech timing verification
+
+The product target changed from natural conversation and lip-sync-first output
+to standalone Hatsune Miku robot speech, with YMM4 retained as an optional
+integration. The standalone `speak` path and the YMM4 speaker now use the same
+`RobotSpeechSequencePlanner`.
+
+An initial robot-speech candidate used 240 ticks per mora at 120 BPM. A real
+automatic VOCALOID6 render of `こんにちは、初音ミクです。` completed without
+assisted fallback, but its 3.675011-second duration was rejected by listener
+feedback as syllable-by-syllable elongation.
+
+The corrected default uses 144 ticks per mora at 120 BPM, a 12-tick note gap,
+minimal word-boundary spacing, and only small duration extensions for `ン` and
+`ツ`. The same real automatic render then produced:
+
+| Measurement | Result |
+| --- | --- |
+| Driver | `Vocaloid6AutomationDriver` |
+| Assisted fallback | `false` |
+| Duration | 2.098957 seconds |
+| Format | PCM signed 16-bit, stereo, 44.1 kHz |
+| Output size | 370,300 bytes |
+| Default pitch | Fixed MIDI note 64 |
+
+The 3.675011-second candidate is not a release artifact. Unit coverage now
+enforces a default rate of 5.5 to 7.5 sounding mora per second so the elongated
+timing cannot silently return.
+
 ## Current automated evidence
 
 | Gate | Result |
 | --- | --- |
-| Unit tests | 30/30 passed |
+| Unit tests | 33/33 passed |
 | Full Release build | Passed, 0 warnings, 0 errors |
 | Package boundary | Passed, 20/20 files allow-listed |
 | Installed YMM4 automatic render | Passed mechanically, no assisted fallback |

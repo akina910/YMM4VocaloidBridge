@@ -12,7 +12,8 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
 {
     private VocaloidDriverMode driverMode = VocaloidDriverMode.Automatic;
     private int tempoBpm = BridgeOptions.DefaultTempoBpm;
-    private int baseNote = 60;
+    private int baseNote = BridgeOptions.DefaultBaseNote;
+    private int speechRatePercent = BridgeOptions.DefaultSpeechRatePercent;
     private int voiceTakeNumber = BridgeOptions.DefaultVoiceTakeNumber;
     private int lipSyncLeadMilliseconds = 33;
     private int timeoutSeconds = 300;
@@ -39,11 +40,21 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
     [Display(Name = "基準音程", Description = "中央ドを60とするMIDIノート番号")]
     [TextBoxSlider("F0", "", 48, 72, Delay = -1)]
     [Range(48, 72)]
-    [DefaultValue(60)]
+    [DefaultValue(BridgeOptions.DefaultBaseNote)]
     public int BaseNote
     {
         get => baseNote;
         set => Set(ref baseNote, value);
+    }
+
+    [Display(Name = "話速", Description = "100%を基準にしたロボ声の速さ")]
+    [TextBoxSlider("F0", "%", 50, 200, Delay = -1)]
+    [Range(50, 200)]
+    [DefaultValue(BridgeOptions.DefaultSpeechRatePercent)]
+    public int SpeechRatePercent
+    {
+        get => speechRatePercent;
+        set => Set(ref speechRatePercent, value);
     }
 
     [Display(Name = "テイク", Description = "VOCALOID:AIの発音タイミング候補")]
@@ -81,6 +92,7 @@ public sealed class MikuV6VoiceParameter : VoiceParameterBase
         DriverMode = DriverMode,
         TempoBpm = TempoBpm,
         BaseNote = BaseNote,
+        SpeechRatePercent = SpeechRatePercent,
         VoiceTakeNumber = VoiceTakeNumber,
         LipSyncLeadMilliseconds = LipSyncLeadMilliseconds,
         TimeoutSeconds = TimeoutSeconds,

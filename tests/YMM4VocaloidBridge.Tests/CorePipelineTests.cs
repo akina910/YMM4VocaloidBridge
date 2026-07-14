@@ -16,10 +16,16 @@ public sealed class CorePipelineTests : IDisposable
     [Fact]
     public void Default_voicebank_is_miku_v6_original()
     {
-        Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", new BridgeOptions().VoicebankName);
-        Assert.Equal(10, new BridgeOptions().VoiceTakeNumber);
+        var options = new BridgeOptions();
+
+        Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", options.VoicebankName);
+        Assert.Equal(10, options.VoiceTakeNumber);
+        Assert.Equal(64, options.BaseNote);
+        Assert.Equal(100, options.SpeechRatePercent);
         Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 0 }.Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 11 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { SpeechRatePercent = 49 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { SpeechRatePercent = 201 }.Validate());
     }
 
     [Fact]
@@ -54,7 +60,7 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal(first.TempoBpm, second.TempoBpm);
         Assert.Equal(first.TotalTicks, second.TotalTicks);
         Assert.Equal(first.Notes, second.Notes);
-        Assert.Equal(120, first.Notes[0].StartTick);
+        Assert.Equal(options.LeadInTicks, first.Notes[0].StartTick);
         Assert.Equal("ハ", first.Notes[0].Lyric);
         Assert.All(first.Notes, note => Assert.InRange(note.NoteNumber, 36, 84));
     }
@@ -76,7 +82,7 @@ public sealed class CorePipelineTests : IDisposable
     {
         var service = new JapaneseReadingService();
         var planner = new DialogueSequencePlanner(new MoraTokenizer());
-        var options = new BridgeOptions();
+        var options = new BridgeOptions { MoraTicks = 160, NoteGapTicks = 0 };
         var question = planner.Plan(service.Convert("行きますか？"), options);
         var statement = planner.Plan(service.Convert("行きます。"), options);
         var sokuon = planner.Plan(service.Convert("待って。"), options);
@@ -94,7 +100,8 @@ public sealed class CorePipelineTests : IDisposable
     public void Dialogue_defaults_use_connected_notes_and_a_speech_like_rate()
     {
         var reading = new JapaneseReadingService().Convert("これは自然な会話です");
-        var sequence = new DialogueSequencePlanner(new MoraTokenizer()).Plan(reading, new BridgeOptions());
+        var options = new BridgeOptions { MoraTicks = 160, NoteGapTicks = 0 };
+        var sequence = new DialogueSequencePlanner(new MoraTokenizer()).Plan(reading, options);
         var first = sequence.Notes[0];
         var last = sequence.Notes[^1];
         var spokenSeconds = (last.StartTick + last.DurationTicks - first.StartTick)
@@ -112,6 +119,63 @@ public sealed class CorePipelineTests : IDisposable
                 Assert.InRange(Math.Abs(pair.Second.NoteNumber - pair.First.NoteNumber), 0, 1);
             });
         Assert.InRange(sequence.Notes.Max(note => note.NoteNumber) - sequence.Notes.Min(note => note.NoteNumber), 0, 2);
+    }
+
+    [Fact]
+    public void Robot_speech_defaults_use_flat_pitch_and_explicit_mora_gaps()
+    {
+        var reading = new JapaneseReadingService().Convert("初音ミクです。");
+        var sequence = new RobotSpeechSequencePlanner(new MoraTokenizer()).Plan(reading, new BridgeOptions());
+
+        Assert.All(sequence.Notes, note => Assert.Equal(64, note.NoteNumber));
+        Assert.All(
+            sequence.Notes.Zip(sequence.Notes.Skip(1)),
+            pair => Assert.True(pair.Second.StartTick > pair.First.StartTick + pair.First.DurationTicks));
+
+        var mi = Assert.Single(sequence.Notes, note => note.Lyric == "ミ");
+        var tsu = Assert.Single(sequence.Notes, note => note.Lyric == "ツ");
+        Assert.True(tsu.DurationTicks > mi.DurationTicks);
+
+        var first = sequence.Notes[0];
+        var last = sequence.Notes[^1];
+        var spokenSeconds = (last.StartTick + last.DurationTicks - first.StartTick)
+            / (double)sequence.TicksPerQuarterNote
+            * 60
+            / sequence.TempoBpm;
+        var moraPerSecond = sequence.Notes.Count / spokenSeconds;
+        Assert.InRange(moraPerSecond, 5.5, 7.5);
+    }
+
+    [Fact]
+    public void Robot_speech_rate_scales_timing_and_sokuon_stays_silent()
+    {
+        var reading = new JapaneseReadingService().Convert("待って、ミク。");
+        var planner = new RobotSpeechSequencePlanner(new MoraTokenizer());
+        var normal = planner.Plan(reading, new BridgeOptions());
+        var fast = planner.Plan(reading, new BridgeOptions { SpeechRatePercent = 150 });
+
+        Assert.DoesNotContain(normal.Notes, note => note.Lyric == "ッ");
+        Assert.True(fast.TotalTicks < normal.TotalTicks);
+        Assert.Equal(normal.Notes.Select(note => note.Lyric), fast.Notes.Select(note => note.Lyric));
+
+        var ma = normal.Notes.Single(note => note.Lyric == "マ");
+        var te = normal.Notes.Single(note => note.Lyric == "テ");
+        Assert.True(te.StartTick - (ma.StartTick + ma.DurationTicks) > new BridgeOptions().NoteGapTicks);
+    }
+
+    [Fact]
+    public void Robot_speech_extreme_rates_keep_valid_non_overlapping_notes()
+    {
+        var reading = new JapaneseReadingService().Convert("待って、初音ミクです。");
+        var planner = new RobotSpeechSequencePlanner(new MoraTokenizer());
+        var slow = planner.Plan(reading, new BridgeOptions { SpeechRatePercent = 50 });
+        var fast = planner.Plan(reading, new BridgeOptions { SpeechRatePercent = 200 });
+
+        Assert.True(slow.TotalTicks > fast.TotalTicks);
+        Assert.All(slow.Notes.Concat(fast.Notes), note => Assert.True(note.DurationTicks >= 15));
+        Assert.All(
+            fast.Notes.Zip(fast.Notes.Skip(1)),
+            pair => Assert.True(pair.Second.StartTick >= pair.First.StartTick + pair.First.DurationTicks));
     }
 
     [Fact]
@@ -469,6 +533,7 @@ public sealed class CorePipelineTests : IDisposable
         Assert.True(File.Exists(artifacts.MidiPath));
         Assert.True(File.Exists(artifacts.LabPath));
         Assert.NotEmpty(artifacts.Sequence.Notes);
+        Assert.All(artifacts.Sequence.Notes, note => Assert.Equal(BridgeOptions.DefaultBaseNote, note.NoteNumber));
         Assert.Contains("pau", await File.ReadAllTextAsync(artifacts.LabPath));
     }
 

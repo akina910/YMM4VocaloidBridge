@@ -55,7 +55,7 @@ jobs:
         shell: pwsh
         run: |
           $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.4" }
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.5" }
           ./tools/build-package.ps1 -Version $version -Ymm4DirPath $ymm4Dir
 
       - name: Verify package boundary
@@ -78,10 +78,25 @@ jobs:
             }
           }
 
+          $standalonePackages = @(Get-ChildItem artifacts/MikuRobotSpeech*.zip -File)
+          if ($standalonePackages.Count -ne 1) {
+            throw "Expected exactly one standalone package, found $($standalonePackages.Count)."
+          }
+          $standalone = $standalonePackages[0]
+          Expand-Archive $standalone.FullName -DestinationPath standalone-check
+          $standaloneExe = Get-Item standalone-check/MikuRobotSpeech.exe
+          if ($standaloneExe.VersionInfo.ProductVersion -notlike "*$revision*") {
+            throw "Standalone binary revision mismatch: $($standaloneExe.VersionInfo.ProductVersion), expected $revision"
+          }
+          & $standaloneExe.FullName --help
+          if ($LASTEXITCODE -ne 0) { throw "Standalone help smoke test failed." }
+
       - uses: actions/upload-artifact@v4
         with:
-          name: YMM4VocaloidBridge-ymme
-          path: artifacts/*.ymme
+          name: YMM4VocaloidBridge-packages
+          path: |
+            artifacts/*.ymme
+            artifacts/MikuRobotSpeech*.zip
           if-no-files-found: error
 
 
@@ -94,7 +109,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: YMM4VocaloidBridge-ymme
+          name: YMM4VocaloidBridge-packages
           path: artifacts
 
       - name: Publish verified tag asset
@@ -102,10 +117,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $package = Get-ChildItem artifacts/*.ymme | Select-Object -First 1
+          $packages = Get-ChildItem artifacts -File | Where-Object { $_.Extension -in ".ymme", ".zip" }
           $tag = $env:GITHUB_REF_NAME
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --verify-tag --prerelease --generate-notes --title "YMM4VocaloidBridge $tag"
           }
-          gh release upload $tag $package.FullName --clobber
+          foreach ($package in $packages) {
+            gh release upload $tag $package.FullName --clobber
+          }

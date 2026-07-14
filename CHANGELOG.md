@@ -4,6 +4,9 @@
 
 ### Added
 
+- Add a standalone `MikuRobotSpeech.exe` package and an interactive double-click workflow that writes WAV files to the desktop.
+- Add a robot-speech sequence planner with fixed MIDI note 64, explicit mora gaps, word boundaries, sokuon silence, punctuation pauses, and 50-200% speech-rate control.
+- Allow CLI work data to be redirected with `YMM4_VOCALOID_BRIDGE_DATA_DIR`.
 - Preserve punctuation across YMM4's custom-reading round trip so pauses and question endings reach synthesis.
 - Analyze rendered WAVE activity, reject silent output, align native YMM4 vowel frames, and expose a configurable lip-sync lead.
 - Add question-ending and sokuon-aware dialogue prosody rules.
@@ -13,6 +16,8 @@
 
 ### Changed
 
+- Make the robot-speech planner the shared default for the standalone CLI and YMM4 plugin.
+- Set the default timing to about 150 ms per mora; a real greeting render is 2.099 seconds instead of the rejected 3.675-second elongated candidate.
 - Require a verifiable HATSUNE MIKU V6 ORIGINAL selection during automatic project setup or MIDI import.
 - Remove release debug paths and force clean, source-revision-stamped packaging.
 - Replace the periodic melody with connected, flat statement notes and a one-semitone question ending.

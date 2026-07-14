@@ -64,3 +64,21 @@ The Claude findings fixed the imported-track selector timeout, restricted update
 The beta.3 completion claim was withdrawn after intelligibility was found to be outside the acceptance gate. Claude Sonnet reviewed the complete beta.4 diff after the quality rework. The review covered bridge-project ownership, clean-session restart, session-recovery handling, exact style/take selection, silent-WAVE rejection, cache invalidation, sokuon timing, lip sync, and CLI dialogue redaction.
 
 Claude reported no high- or medium-severity actionable issue. Its observations were checked against the source: the Japanese recovery labels are valid UTF-8, `WaveAudioAnalyzer.Analyze` rejects unusable audio by exception, and the CLI parser does not support `--text=value`, so the adjacent-value redaction covers accepted syntax. Gemini remains blocked by `UNSUPPORTED_CLIENT` and is not counted as passing evidence. A GitHub Copilot review is required again after the beta.4 commit is pushed.
+
+## beta.5 robot-speech review (2026-07-14)
+
+The standalone robot-speech and shared YMM4-core diff was reviewed by the local
+Qwen 3.6 35B model. The review covered timing validation, fixed-pitch sequence
+generation, interactive CLI behavior, standalone packaging, and the release
+workflow.
+
+Three defensive changes were adopted: explicitly clamp the minimum note gap to
+zero, add milliseconds to interactive output names, and require exactly one
+standalone ZIP during package verification. Two reported P0 findings were
+disproved against the full source: `$revision` is defined in the workflow step
+before use, and `$cliPublish` is defined before the publish/copy block.
+
+The 35B post-fix rerun timed out without a verdict and is not counted. A focused
+post-fix review by the local Qwen 3.5 9.7B model returned `PASS: no P0/P1/P2
+findings`. GitHub Copilot was unavailable because the active `gh` credential is
+invalid, so it is explicitly blocked and not counted as passing evidence.

@@ -16,7 +16,7 @@ public sealed record SequencePlan(
     int TotalTicks,
     IReadOnlyList<SequenceNote> Notes);
 
-public sealed class DialogueSequencePlanner(MoraTokenizer moraTokenizer)
+public sealed class DialogueSequencePlanner(MoraTokenizer moraTokenizer) : ISequencePlanner
 {
     public SequencePlan Plan(JapaneseReadingResult reading, BridgeOptions options)
     {

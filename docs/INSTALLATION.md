@@ -1,4 +1,4 @@
-# Installation and First Run
+# YMM4 Plugin Installation and First Run
 
 ## Requirements
 
@@ -33,7 +33,7 @@ cd "<YMM4 directory>"
 .\user\plugin\YMM4VocaloidBridge\tools\YMM4VocaloidBridge.Cli.exe doctor --ymm4-dir .
 ```
 
-`READY` means YMM4, VOCALOID6 Editor, and HATSUNE MIKU V6 were detected. Add `--json` for machine-readable output.
+`READY` means VOCALOID6 Editor and HATSUNE MIKU V6 were detected. YMM4 is reported separately as an optional integration. Add `--json` for machine-readable output.
 
 Add `--ui` to open the desktop diagnostic window:
 

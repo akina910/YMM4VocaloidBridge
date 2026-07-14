@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.1.0-beta.4",
+    [string]$Version = "0.1.0-beta.5",
     [string]$Ymm4DirPath = $env:YMM4_DIR
 )
 
@@ -9,8 +9,10 @@ $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $artifacts = [System.IO.Path]::GetFullPath((Join-Path $root "artifacts"))
 $publishRoot = Join-Path $artifacts "publish"
 $stagingRoot = Join-Path $artifacts "ymme-staging"
+$standaloneStagingRoot = Join-Path $artifacts "standalone-staging"
 $pluginFolder = Join-Path $stagingRoot "YMM4VocaloidBridge"
 $packagePath = Join-Path $artifacts "YMM4VocaloidBridge.v.$Version.ymme"
+$standalonePath = Join-Path $artifacts "MikuRobotSpeech.v.$Version.win-x64.zip"
 $zipPath = [System.IO.Path]::ChangeExtension($packagePath, ".zip")
 $sourceRevision = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch "^[0-9a-f]{40}$") {
@@ -35,7 +37,7 @@ if ([string]::IsNullOrWhiteSpace($Ymm4DirPath) -or -not (Test-Path (Join-Path $Y
     throw "Set YMM4_DIR or -Ymm4DirPath to a YMM4 directory containing YukkuriMovieMaker.Plugin.dll."
 }
 
-foreach ($path in @($publishRoot, $stagingRoot)) {
+foreach ($path in @($publishRoot, $stagingRoot, $standaloneStagingRoot)) {
     $resolved = [System.IO.Path]::GetFullPath($path)
     if (-not $resolved.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to clean a path outside the artifacts directory: $resolved"
@@ -87,6 +89,17 @@ Copy-Item (Join-Path $root "THIRD-PARTY-NOTICES.md") $pluginFolder
 Copy-Item (Join-Path $root "docs\INSTALLATION.md") $pluginFolder
 Copy-Item (Join-Path $root "licenses") $pluginFolder -Recurse
 
+New-Item -ItemType Directory -Path $standaloneStagingRoot -Force | Out-Null
+Copy-Item -Path (Join-Path $cliPublish "*") -Destination $standaloneStagingRoot -Recurse -Force
+Move-Item `
+    -LiteralPath (Join-Path $standaloneStagingRoot "YMM4VocaloidBridge.Cli.exe") `
+    -Destination (Join-Path $standaloneStagingRoot "MikuRobotSpeech.exe")
+Copy-Item (Join-Path $root "README.md") $standaloneStagingRoot
+Copy-Item (Join-Path $root "LICENSE") $standaloneStagingRoot
+Copy-Item (Join-Path $root "THIRD-PARTY-NOTICES.md") $standaloneStagingRoot
+Copy-Item (Join-Path $root "docs\ROBOT_SPEECH.md") $standaloneStagingRoot
+Copy-Item (Join-Path $root "licenses") $standaloneStagingRoot -Recurse
+
 & (Join-Path $PSScriptRoot "verify-package-boundary.ps1") -PackageRoot $stagingRoot
 if ($LASTEXITCODE -ne 0) { throw "Package boundary verification failed." }
 
@@ -95,4 +108,8 @@ if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath
 Compress-Archive -Path $pluginFolder -DestinationPath $zipPath -CompressionLevel Optimal
 Move-Item -LiteralPath $zipPath -Destination $packagePath
 
+if (Test-Path -LiteralPath $standalonePath) { Remove-Item -LiteralPath $standalonePath -Force }
+Compress-Archive -Path (Join-Path $standaloneStagingRoot "*") -DestinationPath $standalonePath -CompressionLevel Optimal
+
 Write-Output $packagePath
+Write-Output $standalonePath
