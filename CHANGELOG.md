@@ -4,6 +4,7 @@
 
 ### Added
 
+- Start VOCALOID6 in the background when the YMM4 current character changes to the bridge's Hatsune Miku voice.
 - Add a standalone `MikuRobotSpeech.exe` package and an interactive double-click workflow that writes WAV files to the desktop.
 - Add a robot-speech sequence planner with fixed MIDI note 64, explicit mora gaps, word boundaries, sokuon silence, punctuation pauses, and 50-200% speech-rate control.
 - Allow CLI work data to be redirected with `YMM4_VOCALOID_BRIDGE_DATA_DIR`.

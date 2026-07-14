@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.1.0-beta.5",
+    [string]$Version = "0.1.0-beta.6",
     [string]$Ymm4DirPath = $env:YMM4_DIR
 )
 

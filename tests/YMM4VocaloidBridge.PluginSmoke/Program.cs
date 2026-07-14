@@ -3,6 +3,8 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
 
+Environment.SetEnvironmentVariable("YMM4_VOCALOID_BRIDGE_DISABLE_AUTO_START", "1");
+
 if (args.Length != 2)
 {
     Console.Error.WriteLine("Usage: PluginSmoke <plugin-publish-directory> <YMM4-directory>");

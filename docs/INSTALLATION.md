@@ -17,6 +17,7 @@ The bundled doctor CLI is self-contained; it does not require a separate global 
 2. Double-click `YMM4VocaloidBridge.v.<version>.ymme` and approve the YMM4 plugin installation.
 3. Start YMM4.
 4. Select `初音ミク V6 ORIGINAL` under the `VOCALOID6 Bridge` voice engine.
+5. Select a character configured with that voice. VOCALOID6 starts automatically; selecting it again does not create a duplicate editor process.
 
 For a manual portable install, extract the package and place its `YMM4VocaloidBridge` folder under:
 

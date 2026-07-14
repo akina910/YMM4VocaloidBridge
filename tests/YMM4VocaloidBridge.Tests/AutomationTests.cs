@@ -11,6 +11,21 @@ public sealed class AutomationTests : IDisposable
     private readonly string temporaryDirectory = Path.Combine(Path.GetTempPath(), "YMM4VocaloidBridgeAutomationTests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Miku_selection_detector_matches_only_the_bridge_voice()
+    {
+        const string miku = """
+            {"CurrentCharacter":{"Name":"Miku","Voice":{"API":"YMM4VocaloidBridge.Vocaloid6","Arg":"HATSUNE_MIKU_V6"}}}
+            """;
+        const string reimu = """
+            {"CurrentCharacter":{"Name":"Reimu","Voice":{"API":"AquesTalk","Arg":"f1"}}}
+            """;
+
+        Assert.True(MikuSelectionDetector.IsSelected(miku));
+        Assert.False(MikuSelectionDetector.IsSelected(reimu));
+        Assert.False(MikuSelectionDetector.IsSelected("{}"));
+    }
+
+    [Fact]
     public async Task File_waiter_accepts_a_wave_after_it_becomes_stable()
     {
         var path = Path.Combine(temporaryDirectory, "ready.wav");

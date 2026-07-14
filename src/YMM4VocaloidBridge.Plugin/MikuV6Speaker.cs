@@ -52,10 +52,14 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
 
     public bool IsMatch(string api, string id) => api == API && id == ID;
 
-    public IVoiceParameter CreateVoiceParameter() => new MikuV6VoiceParameter();
+    public IVoiceParameter CreateVoiceParameter()
+    {
+        MikuSelectionAutoStarter.NotifyVoiceSelected();
+        return new MikuV6VoiceParameter();
+    }
 
     public IVoiceParameter MigrateParameter(IVoiceParameter currentParameter) =>
-        currentParameter is MikuV6VoiceParameter ? currentParameter : CreateVoiceParameter();
+        currentParameter is MikuV6VoiceParameter ? currentParameter : new MikuV6VoiceParameter();
 
     public Task<string> ConvertKanjiToYomiAsync(string text, IVoiceParameter voiceParameter)
     {
