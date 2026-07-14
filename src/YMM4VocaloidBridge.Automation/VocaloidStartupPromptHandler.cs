@@ -42,30 +42,57 @@ public static class VocaloidStartupPromptHandler
                     continue;
                 }
 
-                var decline = dialog.FindFirst(
-                    TreeScope.Descendants,
-                    new AndCondition(
-                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
-                        new PropertyCondition(AutomationElement.AutomationIdProperty, "7")));
+                var decline = EnumerateControlView(dialog, maximumDepth: 4)
+                    .FirstOrDefault(IsDeclineButton);
                 if (decline is null)
                 {
                     return false;
                 }
 
+                var dialogHandle = IntPtr.Zero;
                 try
                 {
-                    if (!decline.Current.IsEnabled
-                        || !decline.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern))
+                    if (!decline.Current.IsEnabled)
                     {
                         return false;
                     }
 
-                    ((InvokePattern)pattern).Invoke();
-                    return true;
+                    dialogHandle = new IntPtr(dialog.Current.NativeWindowHandle);
+                    if (dialogHandle == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    if (decline.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern))
+                    {
+                        ((InvokePattern)pattern).Invoke();
+                    }
+                    else
+                    {
+                        var buttonHandle = new IntPtr(decline.Current.NativeWindowHandle);
+                        if (buttonHandle == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+
+                        if (NativeMethods.SendMessageTimeout(
+                            buttonHandle,
+                            NativeMethods.ButtonClick,
+                            IntPtr.Zero,
+                            IntPtr.Zero,
+                            NativeMethods.SendMessageTimeoutFlags.AbortIfHung,
+                            2_000,
+                            out _) == IntPtr.Zero)
+                        {
+                            return false;
+                        }
+                    }
+
+                    return WaitForWindowToClose(dialogHandle, TimeSpan.FromSeconds(2));
                 }
                 catch (ElementNotAvailableException)
                 {
-                    return true;
+                    return dialogHandle != IntPtr.Zero && !NativeMethods.IsWindow(dialogHandle);
                 }
                 catch (ElementNotEnabledException)
                 {
@@ -79,6 +106,22 @@ public static class VocaloidStartupPromptHandler
         }
 
         return false;
+    }
+
+    private static bool WaitForWindowToClose(IntPtr windowHandle, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (!NativeMethods.IsWindow(windowHandle))
+            {
+                return true;
+            }
+
+            Thread.Sleep(50);
+        }
+
+        return !NativeMethods.IsWindow(windowHandle);
     }
 
     public static bool IsUnlicensedVoicePromptText(string text)
@@ -119,14 +162,11 @@ public static class VocaloidStartupPromptHandler
     {
         try
         {
-            var values = new List<string> { dialog.Current.Name };
-            values.AddRange(dialog
-                .FindAll(
-                    TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text))
-                .Cast<AutomationElement>()
-                .Select(element => element.Current.Name));
-            return string.Join('\n', values);
+            return string.Join(
+                '\n',
+                EnumerateControlView(dialog, maximumDepth: 4)
+                    .Select(element => element.Current.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name)));
         }
         catch (ElementNotAvailableException)
         {
@@ -135,6 +175,78 @@ public static class VocaloidStartupPromptHandler
         catch (System.Runtime.InteropServices.COMException)
         {
             return string.Empty;
+        }
+    }
+
+    private static IEnumerable<AutomationElement> EnumerateControlView(
+        AutomationElement root,
+        int maximumDepth)
+    {
+        var pending = new Stack<(AutomationElement Element, int Depth)>();
+        pending.Push((root, 0));
+        while (pending.Count > 0)
+        {
+            var (element, depth) = pending.Pop();
+            yield return element;
+            if (depth >= maximumDepth)
+            {
+                continue;
+            }
+
+            AutomationElement? child;
+            try
+            {
+                child = TreeWalker.ControlViewWalker.GetFirstChild(element);
+            }
+            catch (ElementNotAvailableException)
+            {
+                continue;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                continue;
+            }
+
+            var children = new List<AutomationElement>();
+            while (child is not null)
+            {
+                children.Add(child);
+                try
+                {
+                    child = TreeWalker.ControlViewWalker.GetNextSibling(child);
+                }
+                catch (ElementNotAvailableException)
+                {
+                    break;
+                }
+                catch (System.Runtime.InteropServices.COMException)
+                {
+                    break;
+                }
+            }
+
+            for (var index = children.Count - 1; index >= 0; index--)
+            {
+                pending.Push((children[index], depth + 1));
+            }
+        }
+    }
+
+    private static bool IsDeclineButton(AutomationElement element)
+    {
+        try
+        {
+            return string.Equals(element.Current.AutomationId, "7", StringComparison.Ordinal)
+                && string.Equals(element.Current.ClassName, "Button", StringComparison.Ordinal)
+                && element.Current.Name is "いいえ(N)" or "いいえ(&N)" or "No(N)" or "No(&N)" or "No";
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
         }
     }
 
@@ -186,5 +298,30 @@ public static class VocaloidStartupPromptHandler
         {
             return false;
         }
+    }
+
+    private static class NativeMethods
+    {
+        public const uint ButtonClick = 0x00F5;
+
+        [Flags]
+        public enum SendMessageTimeoutFlags : uint
+        {
+            AbortIfHung = 0x0002,
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(
+            IntPtr windowHandle,
+            uint message,
+            IntPtr wordParameter,
+            IntPtr longParameter,
+            SendMessageTimeoutFlags flags,
+            uint timeoutMilliseconds,
+            out UIntPtr result);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        public static extern bool IsWindow(IntPtr windowHandle);
     }
 }
