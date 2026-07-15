@@ -92,6 +92,34 @@ public sealed class AutomationTests : IDisposable
         Assert.Equal("test-failure", observedFailure?.Message);
     }
 
+    [Fact]
+    public void Automatic_driver_does_not_fall_back_to_assisted_by_default()
+    {
+        var automatic = new FakeDriver((_, _) => throw new InvalidOperationException());
+        var assisted = new FakeDriver((_, _) => throw new InvalidOperationException());
+
+        var selected = VocaloidDriverFactory.Create(
+            VocaloidDriverMode.Automatic,
+            automatic,
+            assisted);
+
+        Assert.Same(automatic, selected);
+    }
+
+    [Fact]
+    public void Assisted_driver_is_used_only_when_selected_explicitly()
+    {
+        var automatic = new FakeDriver((_, _) => throw new InvalidOperationException());
+        var assisted = new FakeDriver((_, _) => throw new InvalidOperationException());
+
+        var selected = VocaloidDriverFactory.Create(
+            VocaloidDriverMode.Assisted,
+            automatic,
+            assisted);
+
+        Assert.Same(assisted, selected);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(temporaryDirectory))

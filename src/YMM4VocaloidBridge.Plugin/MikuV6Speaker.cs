@@ -117,12 +117,11 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
 
             var waiter = new FileReadyWaiter(waveValidator);
             IVocaloidDriver assisted = new AssistedVocaloidDriver(waiter);
-            IVocaloidDriver driver = options.DriverMode == VocaloidDriverMode.Automatic
-                ? new FallbackVocaloidDriver(
-                    new Vocaloid6AutomationDriver(waiter),
-                    assisted,
-                    exception => logger.WriteAsync("automatic-failed", new { exception.Message }))
-                : assisted;
+            var driver = VocaloidDriverFactory.Create(
+                options.DriverMode,
+                new Vocaloid6AutomationDriver(waiter),
+                assisted,
+                allowAutomaticFallback: false);
             await logger.WriteAsync(
                 "render-start",
                 new
@@ -132,7 +131,19 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
                     renderExtension = Path.GetExtension(waveOutput.RenderPath),
                 }).ConfigureAwait(false);
             var request = new VocaloidRenderRequest(artifacts, options, waveOutput.RenderPath, report.Installation);
-            var render = await driver.RenderAsync(request).ConfigureAwait(false);
+            VocaloidRenderResult render;
+            try
+            {
+                render = await driver.RenderAsync(request).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (
+                options.DriverMode == VocaloidDriverMode.Automatic
+                && exception is not OperationCanceledException)
+            {
+                await logger.WriteAsync("automatic-failed", new { exception.Message }).ConfigureAwait(false);
+                throw;
+            }
+
             _ = waveValidator.Validate(waveOutput.RenderPath);
             await waveOutput.PublishAsync().ConfigureAwait(false);
             _ = waveValidator.Validate(waveOutput.RequestedPath);

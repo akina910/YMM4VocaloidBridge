@@ -32,6 +32,7 @@
 - Decline only the identified VOCALOID6 unlicensed-Voice authorization prompt so unrelated installed Voices do not block Miku startup.
 - Traverse the Win32 authorization dialog's control view so its text and safe decline action are found reliably on VOCALOID6 6.13.
 - Keep the background startup-prompt watcher active through slower VOCALOID6 cold starts.
+- Keep YMM4 Automatic mode fully automatic so a failed batch item never waits on a closed assisted-render text guide.
 - Reject silent automatic renders instead of treating a structurally valid WAVE file as successful output.
 - Select custom styles and takes through UI Automation selection patterns and verify the resulting selection.
 - Dismiss only identified update and session-recovery prompts, and never close a project containing a named non-bridge track.

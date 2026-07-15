@@ -55,7 +55,7 @@ jobs:
         shell: pwsh
         run: |
           $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.9" }
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.10" }
           ./tools/build-package.ps1 -Version $version -Ymm4DirPath $ymm4Dir
 
       - name: Verify package boundary

@@ -228,12 +228,7 @@ internal static class BridgeCli
         var automatic = new Vocaloid6AutomationDriver(waiter);
         var allowFallback = !arguments.HasFlag("no-fallback")
             && (allowFallbackByDefault || arguments.HasFlag("allow-fallback"));
-        IVocaloidDriver driver = options.DriverMode switch
-        {
-            VocaloidDriverMode.Automatic when !allowFallback => automatic,
-            VocaloidDriverMode.Automatic => new FallbackVocaloidDriver(automatic, assisted),
-            _ => assisted,
-        };
+        var driver = VocaloidDriverFactory.Create(options.DriverMode, automatic, assisted, allowFallback);
         var result = await driver.RenderAsync(
             new VocaloidRenderRequest(artifacts, options, outputPath, installation.Installation))
             .ConfigureAwait(false);
