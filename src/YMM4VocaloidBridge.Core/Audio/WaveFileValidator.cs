@@ -13,6 +13,9 @@ public sealed record WaveFileInfo(
 
 public sealed class WaveFileValidator
 {
+    private static readonly Guid PcmSubFormat = new("00000001-0000-0010-8000-00aa00389b71");
+    private static readonly Guid FloatSubFormat = new("00000003-0000-0010-8000-00aa00389b71");
+
     public WaveFileInfo Validate(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -35,7 +38,8 @@ public sealed class WaveFileValidator
         int sampleRate = 0;
         ushort bitsPerSample = 0;
         long dataBytes = 0;
-        Span<byte> format = stackalloc byte[16];
+        Span<byte> format = stackalloc byte[40];
+        format.Clear();
 
         while (stream.Position + 8 <= stream.Length)
         {
@@ -54,13 +58,15 @@ public sealed class WaveFileValidator
                     throw new InvalidDataException("The WAVE format chunk is too short.");
                 }
 
-                stream.ReadExactly(format);
+                var formatBytes = checked((int)Math.Min(chunkLength, (uint)format.Length));
+                stream.ReadExactly(format[..formatBytes]);
                 audioFormat = BinaryPrimitives.ReadUInt16LittleEndian(format);
                 channels = BinaryPrimitives.ReadUInt16LittleEndian(format[2..]);
                 sampleRate = BinaryPrimitives.ReadInt32LittleEndian(format[4..]);
                 bitsPerSample = BinaryPrimitives.ReadUInt16LittleEndian(format[14..]);
+                audioFormat = ResolveAudioFormat(audioFormat, format, chunkLength);
             }
-            else if (chunkId == "data")
+            else if (chunkId == "data" && dataBytes == 0)
             {
                 dataBytes = chunkLength;
             }
@@ -79,4 +85,25 @@ public sealed class WaveFileValidator
     }
 
     private static string ReadFourCc(BinaryReader reader) => Encoding.ASCII.GetString(reader.ReadBytes(4));
+
+    private static ushort ResolveAudioFormat(ushort audioFormat, ReadOnlySpan<byte> format, uint chunkLength)
+    {
+        if (audioFormat != 0xFFFE)
+        {
+            return audioFormat;
+        }
+
+        if (chunkLength < 40 || BinaryPrimitives.ReadUInt16LittleEndian(format[16..]) < 22)
+        {
+            throw new InvalidDataException("The WAVE_FORMAT_EXTENSIBLE chunk is incomplete.");
+        }
+
+        var subFormat = new Guid(format[24..40]);
+        if (subFormat == PcmSubFormat)
+        {
+            return 1;
+        }
+
+        return subFormat == FloatSubFormat ? (ushort)3 : (ushort)0xFFFE;
+    }
 }

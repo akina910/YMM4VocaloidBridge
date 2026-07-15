@@ -3,11 +3,6 @@ name: Build YMME package
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - ".github/workflows/package.yml"
-      - "src/**"
-      - "tests/**"
-      - "tools/build-package.ps1"
   push:
     tags: ["v*"]
 
@@ -31,33 +26,37 @@ jobs:
       - uses: actions/cache@v4
         id: ymm4-cache
         with:
-          path: .ymm4
+          path: ${{ runner.temp }}\ymm4-v4.54.0.1
           key: ymm4-${{ runner.os }}-${{ env.YMM4_VERSION }}
 
       - name: Download official YMM4 compatibility target
         if: steps.ymm4-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path .ymm4 -Force | Out-Null
-          Invoke-WebRequest $env:YMM4_URL -OutFile ymm4.zip
-          Expand-Archive ymm4.zip -DestinationPath .ymm4
+          $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
+          $archive = Join-Path $env:RUNNER_TEMP "YukkuriMovieMaker.zip"
+          New-Item -ItemType Directory -Path $ymm4Dir -Force | Out-Null
+          Invoke-WebRequest $env:YMM4_URL -OutFile $archive
+          Expand-Archive $archive -DestinationPath $ymm4Dir
 
       - name: Build and test plugin against YMM4
         shell: pwsh
         run: |
+          $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
           dotnet build src/YMM4VocaloidBridge.Plugin/YMM4VocaloidBridge.Plugin.csproj `
-            -c Release "-p:YMM4DirPath=$((Resolve-Path .ymm4).Path)"
+            -c Release "-p:YMM4DirPath=$ymm4Dir"
           dotnet test tests/YMM4VocaloidBridge.Tests/YMM4VocaloidBridge.Tests.csproj -c Release
           dotnet run --project tests/YMM4VocaloidBridge.PluginSmoke/YMM4VocaloidBridge.PluginSmoke.csproj `
             -c Release -- `
             (Resolve-Path src/YMM4VocaloidBridge.Plugin/bin/Release/net10.0-windows10.0.19041.0).Path `
-            (Resolve-Path .ymm4).Path
+            $ymm4Dir
 
       - name: Create package
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.1" }
-          ./tools/build-package.ps1 -Version $version -Ymm4DirPath (Resolve-Path .ymm4).Path
+          $ymm4Dir = Join-Path $env:RUNNER_TEMP "ymm4-v4.54.0.1"
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-beta.11" }
+          ./tools/build-package.ps1 -Version $version -Ymm4DirPath $ymm4Dir
 
       - name: Verify package boundary
         shell: pwsh
@@ -65,14 +64,65 @@ jobs:
           $package = Get-ChildItem artifacts/*.ymme | Select-Object -First 1
           Copy-Item $package.FullName package.zip
           Expand-Archive package.zip -DestinationPath package-check
-          $forbidden = Get-ChildItem package-check -Recurse -File | Where-Object {
-            $_.Name -match "YukkuriMovieMaker\.|VOCALOID|HATSUNE_MIKU" -and
-            $_.Name -notmatch "YMM4VocaloidBridge"
+          ./tools/verify-package-boundary.ps1 -PackageRoot package-check
+
+          $revision = git rev-parse HEAD
+          $binaries = Get-ChildItem package-check -Recurse -File | Where-Object {
+            $_.Name -like "YMM4VocaloidBridge.*.dll" -or
+            $_.Name -eq "YMM4VocaloidBridge.Cli.exe"
           }
-          if ($forbidden) { throw "Package includes a forbidden product file: $($forbidden.FullName -join ', ')" }
+          foreach ($binary in $binaries) {
+            $productVersion = $binary.VersionInfo.ProductVersion
+            if ($productVersion -notlike "*$revision*") {
+              throw "Package binary revision mismatch: $($binary.Name) = $productVersion, expected $revision"
+            }
+          }
+
+          $standalonePackages = @(Get-ChildItem artifacts/MikuRobotSpeech*.zip -File)
+          if ($standalonePackages.Count -ne 1) {
+            throw "Expected exactly one standalone package, found $($standalonePackages.Count)."
+          }
+          $standalone = $standalonePackages[0]
+          Expand-Archive $standalone.FullName -DestinationPath standalone-check
+          $standaloneExe = Get-Item standalone-check/MikuRobotSpeech.exe
+          if ($standaloneExe.VersionInfo.ProductVersion -notlike "*$revision*") {
+            throw "Standalone binary revision mismatch: $($standaloneExe.VersionInfo.ProductVersion), expected $revision"
+          }
+          & $standaloneExe.FullName --help
+          if ($LASTEXITCODE -ne 0) { throw "Standalone help smoke test failed." }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: YMM4VocaloidBridge-ymme
-          path: artifacts/*.ymme
+          name: YMM4VocaloidBridge-packages
+          path: |
+            artifacts/*.ymme
+            artifacts/MikuRobotSpeech*.zip
           if-no-files-found: error
+
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: YMM4VocaloidBridge-packages
+          path: artifacts
+
+      - name: Publish verified tag asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $packages = Get-ChildItem artifacts -File | Where-Object { $_.Extension -in ".ymme", ".zip" }
+          $tag = $env:GITHUB_REF_NAME
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --prerelease --generate-notes --title "YMM4VocaloidBridge $tag"
+          }
+          foreach ($package in $packages) {
+            gh release upload $tag $package.FullName --clobber
+          }

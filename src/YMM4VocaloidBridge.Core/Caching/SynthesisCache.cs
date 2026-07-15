@@ -8,7 +8,7 @@ namespace YMM4VocaloidBridge.Core.Caching;
 
 public static class SynthesisCacheKey
 {
-    private const string SchemaVersion = "ymm4-vocaloid-bridge-cache-v1";
+    private const string SchemaVersion = "ymm4-vocaloid-bridge-cache-v5-robot-speech";
 
     public static string Create(string normalizedText, BridgeOptions options, string vocaloidVersion)
     {
@@ -46,6 +46,15 @@ public sealed class SynthesisCache(string rootDirectory)
     {
         var destination = GetPath(key);
         await AtomicFilePublisher.CopyAsync(sourcePath, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void Remove(string key)
+    {
+        var path = GetPath(key);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
     }
 
     private string GetPath(string key) => Path.Combine(rootDirectory, key + ".wav");

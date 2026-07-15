@@ -13,14 +13,14 @@ public sealed record SynthesisArtifacts(
 
 public sealed class SynthesisArtifactBuilder(
     JapaneseReadingService readingService,
-    DialogueSequencePlanner sequencePlanner,
+    ISequencePlanner sequencePlanner,
     StandardMidiWriter midiWriter,
     LipSyncPlanner lipSyncPlanner,
     LabWriter labWriter)
 {
     public static SynthesisArtifactBuilder CreateDefault() => new(
         new JapaneseReadingService(),
-        new DialogueSequencePlanner(new MoraTokenizer()),
+        new RobotSpeechSequencePlanner(new MoraTokenizer()),
         new StandardMidiWriter(),
         new LipSyncPlanner(),
         new LabWriter());

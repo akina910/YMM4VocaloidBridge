@@ -6,6 +6,7 @@ using YMM4VocaloidBridge.Automation;
 using YMM4VocaloidBridge.Core;
 using YMM4VocaloidBridge.Core.Audio;
 using YMM4VocaloidBridge.Core.Caching;
+using YMM4VocaloidBridge.Core.LipSync;
 using YMM4VocaloidBridge.Core.Reading;
 
 namespace YMM4VocaloidBridge.Plugin;
@@ -20,6 +21,9 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
     private readonly JapaneseReadingService readingService = new();
     private readonly VocaloidInstallationDetector installationDetector = new();
     private readonly WaveFileValidator waveValidator = new();
+    private readonly WaveAudioAnalyzer waveAudioAnalyzer = new();
+    private readonly LipSyncTimelineAligner lipSyncTimelineAligner = new();
+    private readonly LabWriter labWriter = new();
     private readonly BridgeEventLogger logger = new();
 
     public string EngineName => "VOCALOID6 Bridge";
@@ -48,10 +52,14 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
 
     public bool IsMatch(string api, string id) => api == API && id == ID;
 
-    public IVoiceParameter CreateVoiceParameter() => new MikuV6VoiceParameter();
+    public IVoiceParameter CreateVoiceParameter()
+    {
+        MikuSelectionAutoStarter.NotifyVoiceSelected();
+        return new MikuV6VoiceParameter();
+    }
 
     public IVoiceParameter MigrateParameter(IVoiceParameter currentParameter) =>
-        currentParameter is MikuV6VoiceParameter ? currentParameter : CreateVoiceParameter();
+        currentParameter is MikuV6VoiceParameter ? currentParameter : new MikuV6VoiceParameter();
 
     public Task<string> ConvertKanjiToYomiAsync(string text, IVoiceParameter voiceParameter)
     {
@@ -87,23 +95,33 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
             var artifacts = await SynthesisArtifactBuilder.CreateDefault()
                 .BuildAsync(text, options, workDirectory)
                 .ConfigureAwait(false);
-            var resultPronounce = new MikuV6Pronounce(artifacts.LipSyncFrames);
-
             if (await cache.TryRestoreAsync(cacheKey, filePath).ConfigureAwait(false))
             {
-                _ = waveValidator.Validate(filePath);
-                await logger.WriteAsync("cache-hit", new { frames = artifacts.LipSyncFrames.Count }).ConfigureAwait(false);
-                return resultPronounce;
+                try
+                {
+                    _ = waveValidator.Validate(filePath);
+                    var cachedPronounce = await CreateAlignedPronounceAsync(artifacts, filePath, options).ConfigureAwait(false);
+                    await logger.WriteAsync(
+                        "cache-hit",
+                        new { frames = cachedPronounce.LipSyncFrames.Length }).ConfigureAwait(false);
+                    return cachedPronounce;
+                }
+                catch (InvalidDataException)
+                {
+                    cache.Remove(cacheKey);
+                    File.Delete(filePath);
+                    await logger.WriteAsync("cache-rejected", new { reason = "invalid-or-silent-wave" })
+                        .ConfigureAwait(false);
+                }
             }
 
             var waiter = new FileReadyWaiter(waveValidator);
             IVocaloidDriver assisted = new AssistedVocaloidDriver(waiter);
-            IVocaloidDriver driver = options.DriverMode == VocaloidDriverMode.Automatic
-                ? new FallbackVocaloidDriver(
-                    new Vocaloid6AutomationDriver(waiter),
-                    assisted,
-                    exception => logger.WriteAsync("automatic-failed", new { exception.Message }))
-                : assisted;
+            var driver = VocaloidDriverFactory.Create(
+                options.DriverMode,
+                new Vocaloid6AutomationDriver(waiter),
+                assisted,
+                allowAutomaticFallback: false);
             await logger.WriteAsync(
                 "render-start",
                 new
@@ -113,10 +131,26 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
                     renderExtension = Path.GetExtension(waveOutput.RenderPath),
                 }).ConfigureAwait(false);
             var request = new VocaloidRenderRequest(artifacts, options, waveOutput.RenderPath, report.Installation);
-            var render = await driver.RenderAsync(request).ConfigureAwait(false);
+            VocaloidRenderResult render;
+            try
+            {
+                render = await driver.RenderAsync(request).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (
+                options.DriverMode == VocaloidDriverMode.Automatic
+                && exception is not OperationCanceledException)
+            {
+                await logger.WriteAsync("automatic-failed", new { exception.Message }).ConfigureAwait(false);
+                throw;
+            }
+
             _ = waveValidator.Validate(waveOutput.RenderPath);
             await waveOutput.PublishAsync().ConfigureAwait(false);
             _ = waveValidator.Validate(waveOutput.RequestedPath);
+            var resultPronounce = await CreateAlignedPronounceAsync(
+                artifacts,
+                waveOutput.RequestedPath,
+                options).ConfigureAwait(false);
             await cache.StoreAsync(cacheKey, filePath).ConfigureAwait(false);
             await logger.WriteAsync(
                 "render-complete",
@@ -143,6 +177,30 @@ public sealed class MikuV6Speaker : IVoiceSpeaker
         {
             SynthesisSemaphore.Release();
         }
+    }
+
+    private async Task<MikuV6Pronounce> CreateAlignedPronounceAsync(
+        SynthesisArtifacts artifacts,
+        string wavePath,
+        BridgeOptions options)
+    {
+        var activity = waveAudioAnalyzer.Analyze(wavePath);
+        var frames = lipSyncTimelineAligner.Align(
+            artifacts.LipSyncFrames,
+            activity,
+            TimeSpan.FromMilliseconds(options.LipSyncLeadMilliseconds));
+        await labWriter.WriteAsync(frames, artifacts.LabPath).ConfigureAwait(false);
+        await logger.WriteAsync(
+            "lip-sync-aligned",
+            new
+            {
+                frames = frames.Count,
+                activeStartMilliseconds = activity.ActiveStart.TotalMilliseconds,
+                activeEndMilliseconds = activity.ActiveEnd.TotalMilliseconds,
+                durationMilliseconds = activity.Format.Duration.TotalMilliseconds,
+                options.LipSyncLeadMilliseconds,
+            }).ConfigureAwait(false);
+        return new MikuV6Pronounce(frames);
     }
 
     private static void CleanupOldWorkspaces(string rootDirectory, TimeSpan maximumAge)

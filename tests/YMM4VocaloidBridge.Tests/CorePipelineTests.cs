@@ -16,7 +16,16 @@ public sealed class CorePipelineTests : IDisposable
     [Fact]
     public void Default_voicebank_is_miku_v6_original()
     {
-        Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", new BridgeOptions().VoicebankName);
+        var options = new BridgeOptions();
+
+        Assert.Equal("HATSUNE_MIKU_V6_ORIGINAL", options.VoicebankName);
+        Assert.Equal(10, options.VoiceTakeNumber);
+        Assert.Equal(64, options.BaseNote);
+        Assert.Equal(125, options.SpeechRatePercent);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 0 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { VoiceTakeNumber = 11 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { SpeechRatePercent = 49 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BridgeOptions { SpeechRatePercent = 201 }.Validate());
     }
 
     [Fact]
@@ -24,7 +33,7 @@ public sealed class CorePipelineTests : IDisposable
     {
         var result = new JapaneseReadingService().Convert("今日は初音ミクです。ありがとう！");
 
-        Assert.Equal("キョーワハツネミクデスアリガトー", result.Pronunciation);
+        Assert.Equal("キョーワハツネミクデス。アリガトー!", result.Pronunciation);
         Assert.Contains(result.Segments, x => x.Surface == "は" && x.Pronunciation == "ワ");
         Assert.Contains(result.Segments, x => x.Surface == "。" && x.IsPunctuation);
     }
@@ -51,9 +60,122 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal(first.TempoBpm, second.TempoBpm);
         Assert.Equal(first.TotalTicks, second.TotalTicks);
         Assert.Equal(first.Notes, second.Notes);
-        Assert.Equal(240, first.Notes[0].StartTick);
+        Assert.Equal(options.LeadInTicks, first.Notes[0].StartTick);
         Assert.Equal("ハ", first.Notes[0].Lyric);
         Assert.All(first.Notes, note => Assert.InRange(note.NoteNumber, 36, 84));
+    }
+
+    [Fact]
+    public void Reading_round_trip_preserves_dialogue_punctuation_for_YMM4()
+    {
+        var service = new JapaneseReadingService();
+        var first = service.Convert("待って、行きますか？");
+        var second = service.Convert(first.Pronunciation);
+
+        Assert.Contains(second.Segments, segment => segment.Surface == "、" && segment.IsPunctuation);
+        Assert.Contains(second.Segments, segment => segment.Surface == "?" && segment.IsPunctuation);
+        Assert.EndsWith("?", second.Pronunciation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Dialogue_prosody_raises_questions_and_keeps_sokuon_as_silence()
+    {
+        var service = new JapaneseReadingService();
+        var planner = new DialogueSequencePlanner(new MoraTokenizer());
+        var options = new BridgeOptions { MoraTicks = 160, NoteGapTicks = 0 };
+        var question = planner.Plan(service.Convert("行きますか？"), options);
+        var statement = planner.Plan(service.Convert("行きます。"), options);
+        var sokuon = planner.Plan(service.Convert("待って。"), options);
+
+        Assert.True(question.Notes[^1].NoteNumber > question.Notes[^2].NoteNumber);
+        Assert.True(question.Notes[^1].NoteNumber > statement.Notes[^1].NoteNumber);
+        Assert.DoesNotContain(sokuon.Notes, note => note.Lyric == "ッ");
+        Assert.Equal(2, sokuon.Notes.Count);
+        Assert.Equal(
+            options.MoraTicks,
+            sokuon.Notes[1].StartTick - (sokuon.Notes[0].StartTick + sokuon.Notes[0].DurationTicks));
+    }
+
+    [Fact]
+    public void Dialogue_defaults_use_connected_notes_and_a_speech_like_rate()
+    {
+        var reading = new JapaneseReadingService().Convert("これは自然な会話です");
+        var options = new BridgeOptions { MoraTicks = 160, NoteGapTicks = 0 };
+        var sequence = new DialogueSequencePlanner(new MoraTokenizer()).Plan(reading, options);
+        var first = sequence.Notes[0];
+        var last = sequence.Notes[^1];
+        var spokenSeconds = (last.StartTick + last.DurationTicks - first.StartTick)
+            / (double)sequence.TicksPerQuarterNote
+            * 60
+            / sequence.TempoBpm;
+        var moraPerSecond = sequence.Notes.Count / spokenSeconds;
+
+        Assert.InRange(moraPerSecond, 5.5, 8.0);
+        Assert.All(
+            sequence.Notes.Zip(sequence.Notes.Skip(1)),
+            pair =>
+            {
+                Assert.Equal(pair.First.StartTick + pair.First.DurationTicks, pair.Second.StartTick);
+                Assert.InRange(Math.Abs(pair.Second.NoteNumber - pair.First.NoteNumber), 0, 1);
+            });
+        Assert.InRange(sequence.Notes.Max(note => note.NoteNumber) - sequence.Notes.Min(note => note.NoteNumber), 0, 2);
+    }
+
+    [Fact]
+    public void Robot_speech_defaults_use_flat_pitch_and_explicit_mora_gaps()
+    {
+        var reading = new JapaneseReadingService().Convert("初音ミクです。");
+        var sequence = new RobotSpeechSequencePlanner(new MoraTokenizer()).Plan(reading, new BridgeOptions());
+
+        Assert.All(sequence.Notes, note => Assert.Equal(64, note.NoteNumber));
+        Assert.All(
+            sequence.Notes.Zip(sequence.Notes.Skip(1)),
+            pair => Assert.True(pair.Second.StartTick > pair.First.StartTick + pair.First.DurationTicks));
+
+        var mi = Assert.Single(sequence.Notes, note => note.Lyric == "ミ");
+        var tsu = Assert.Single(sequence.Notes, note => note.Lyric == "ツ");
+        Assert.True(tsu.DurationTicks > mi.DurationTicks);
+
+        var first = sequence.Notes[0];
+        var last = sequence.Notes[^1];
+        var spokenSeconds = (last.StartTick + last.DurationTicks - first.StartTick)
+            / (double)sequence.TicksPerQuarterNote
+            * 60
+            / sequence.TempoBpm;
+        var moraPerSecond = sequence.Notes.Count / spokenSeconds;
+        Assert.InRange(moraPerSecond, 7.0, 9.0);
+    }
+
+    [Fact]
+    public void Robot_speech_rate_scales_timing_and_sokuon_stays_silent()
+    {
+        var reading = new JapaneseReadingService().Convert("待って、ミク。");
+        var planner = new RobotSpeechSequencePlanner(new MoraTokenizer());
+        var normal = planner.Plan(reading, new BridgeOptions());
+        var fast = planner.Plan(reading, new BridgeOptions { SpeechRatePercent = 150 });
+
+        Assert.DoesNotContain(normal.Notes, note => note.Lyric == "ッ");
+        Assert.True(fast.TotalTicks < normal.TotalTicks);
+        Assert.Equal(normal.Notes.Select(note => note.Lyric), fast.Notes.Select(note => note.Lyric));
+
+        var ma = normal.Notes.Single(note => note.Lyric == "マ");
+        var te = normal.Notes.Single(note => note.Lyric == "テ");
+        Assert.True(te.StartTick - (ma.StartTick + ma.DurationTicks) > new BridgeOptions().NoteGapTicks);
+    }
+
+    [Fact]
+    public void Robot_speech_extreme_rates_keep_valid_non_overlapping_notes()
+    {
+        var reading = new JapaneseReadingService().Convert("待って、初音ミクです。");
+        var planner = new RobotSpeechSequencePlanner(new MoraTokenizer());
+        var slow = planner.Plan(reading, new BridgeOptions { SpeechRatePercent = 50 });
+        var fast = planner.Plan(reading, new BridgeOptions { SpeechRatePercent = 200 });
+
+        Assert.True(slow.TotalTicks > fast.TotalTicks);
+        Assert.All(slow.Notes.Concat(fast.Notes), note => Assert.True(note.DurationTicks >= 15));
+        Assert.All(
+            fast.Notes.Zip(fast.Notes.Skip(1)),
+            pair => Assert.True(pair.Second.StartTick >= pair.First.StartTick + pair.First.DurationTicks));
     }
 
     [Fact]
@@ -97,6 +219,139 @@ public sealed class CorePipelineTests : IDisposable
         Assert.Equal((ushort)1, result.Channels);
         Assert.Equal(44_100, result.SampleRate);
         Assert.Equal(TimeSpan.FromMilliseconds(100), result.Duration);
+    }
+
+    [Fact]
+    public void Wave_audio_analyzer_detects_activity_boundaries()
+    {
+        var path = Path.Combine(temporaryDirectory, "dialogue.wav");
+        WritePcmWaveWithActivity(
+            path,
+            sampleRate: 44_100,
+            duration: TimeSpan.FromSeconds(1),
+            activeStart: TimeSpan.FromMilliseconds(200),
+            activeEnd: TimeSpan.FromMilliseconds(700));
+
+        var result = new WaveAudioAnalyzer().Analyze(path);
+
+        Assert.InRange(result.ActiveStart.TotalMilliseconds, 170, 210);
+        Assert.InRange(result.ActiveEnd.TotalMilliseconds, 690, 730);
+        Assert.True(result.PeakAmplitude > 0.01);
+        Assert.True(result.RmsAmplitude > 0.001);
+    }
+
+    [Fact]
+    public void Wave_audio_analyzer_rejects_silent_pcm()
+    {
+        var path = Path.Combine(temporaryDirectory, "silent.wav");
+        WritePcmWaveWithActivity(
+            path,
+            sampleRate: 44_100,
+            duration: TimeSpan.FromSeconds(1),
+            activeStart: TimeSpan.Zero,
+            activeEnd: TimeSpan.Zero);
+
+        Assert.Throws<InvalidDataException>(() => new WaveAudioAnalyzer().Analyze(path));
+    }
+
+    [Fact]
+    public void Wave_audio_analyzer_accepts_extensible_pcm()
+    {
+        var path = Path.Combine(temporaryDirectory, "extensible.wav");
+        WriteExtensiblePcmWaveWithActivity(
+            path,
+            sampleRate: 44_100,
+            duration: TimeSpan.FromMilliseconds(500),
+            activeStart: TimeSpan.FromMilliseconds(100),
+            activeEnd: TimeSpan.FromMilliseconds(400));
+
+        var result = new WaveAudioAnalyzer().Analyze(path);
+
+        Assert.Equal((ushort)1, result.Format.AudioFormat);
+        Assert.InRange(result.ActiveStart.TotalMilliseconds, 90, 110);
+        Assert.InRange(result.ActiveEnd.TotalMilliseconds, 390, 410);
+    }
+
+    [Fact]
+    public void Lip_sync_timeline_aligns_to_rendered_audio_and_applies_lead()
+    {
+        var path = Path.Combine(temporaryDirectory, "aligned.wav");
+        WritePcmWaveWithActivity(
+            path,
+            sampleRate: 44_100,
+            duration: TimeSpan.FromSeconds(1),
+            activeStart: TimeSpan.FromMilliseconds(200),
+            activeEnd: TimeSpan.FromMilliseconds(700));
+        var activity = new WaveAudioAnalyzer().Analyze(path);
+        LipSyncFrame[] planned =
+        [
+            new(TimeSpan.Zero, MouthShape.Closed),
+            new(TimeSpan.FromMilliseconds(250), MouthShape.A),
+            new(TimeSpan.FromMilliseconds(500), MouthShape.I),
+            new(TimeSpan.FromMilliseconds(750), MouthShape.U),
+            new(TimeSpan.FromMilliseconds(1_000), MouthShape.Closed),
+            new(TimeSpan.FromMilliseconds(1_500), MouthShape.Closed),
+        ];
+
+        var aligned = new LipSyncTimelineAligner().Align(planned, activity, TimeSpan.FromMilliseconds(33));
+
+        var firstOpen = aligned.First(frame => frame.Shape != MouthShape.Closed);
+        var closing = aligned.First(frame => frame.Time > firstOpen.Time && frame.Shape == MouthShape.Closed);
+        // Detected speech start/end minus the configured visual lead: about 167 ms and 667 ms.
+        Assert.InRange(firstOpen.Time.TotalMilliseconds, 135, 180);
+        Assert.InRange(closing.Time.TotalMilliseconds, 655, 700);
+        Assert.Equal(TimeSpan.FromSeconds(1), aligned[^1].Time);
+        Assert.Equal(MouthShape.Closed, aligned[^1].Shape);
+    }
+
+    [Fact]
+    public void Lip_sync_timeline_preserves_transitions_when_audio_interval_is_shorter()
+    {
+        var format = new WaveFileInfo(1, 1, 44_100, 16, 88_200, TimeSpan.FromSeconds(1));
+        var activity = new WaveAudioActivity(
+            format,
+            0.5,
+            0.1,
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(5));
+        LipSyncFrame[] planned =
+        [
+            new(TimeSpan.Zero, MouthShape.Closed),
+            new(TimeSpan.FromMilliseconds(100), MouthShape.A),
+            new(TimeSpan.FromMilliseconds(200), MouthShape.I),
+            new(TimeSpan.FromMilliseconds(300), MouthShape.U),
+            new(TimeSpan.FromMilliseconds(400), MouthShape.E),
+            new(TimeSpan.FromMilliseconds(500), MouthShape.Closed),
+        ];
+
+        var aligned = new LipSyncTimelineAligner().Align(planned, activity, TimeSpan.Zero);
+
+        Assert.Equal(
+            [MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E],
+            aligned.Where(frame => frame.Shape != MouthShape.Closed).Select(frame => frame.Shape));
+        Assert.Equal(4, aligned.Where(frame => frame.Shape != MouthShape.Closed).Select(frame => frame.Time).Distinct().Count());
+    }
+
+    [Fact]
+    public void Lip_sync_timeline_accepts_a_single_open_frame()
+    {
+        var format = new WaveFileInfo(1, 1, 44_100, 16, 44_100, TimeSpan.FromMilliseconds(500));
+        var activity = new WaveAudioActivity(
+            format,
+            0.5,
+            0.1,
+            TimeSpan.FromMilliseconds(100),
+            TimeSpan.FromMilliseconds(300));
+        LipSyncFrame[] planned =
+        [
+            new(TimeSpan.Zero, MouthShape.Closed),
+            new(TimeSpan.FromMilliseconds(100), MouthShape.A),
+        ];
+
+        var aligned = new LipSyncTimelineAligner().Align(planned, activity, TimeSpan.Zero);
+
+        Assert.Contains(aligned, frame => frame.Shape == MouthShape.A);
+        Assert.Equal(MouthShape.Closed, aligned[^1].Shape);
     }
 
     [Theory]
@@ -278,6 +533,7 @@ public sealed class CorePipelineTests : IDisposable
         Assert.True(File.Exists(artifacts.MidiPath));
         Assert.True(File.Exists(artifacts.LabPath));
         Assert.NotEmpty(artifacts.Sequence.Notes);
+        Assert.All(artifacts.Sequence.Notes, note => Assert.Equal(BridgeOptions.DefaultBaseNote, note.NoteNumber));
         Assert.Contains("pau", await File.ReadAllTextAsync(artifacts.LabPath));
     }
 
@@ -340,6 +596,76 @@ public sealed class CorePipelineTests : IDisposable
         for (var index = 0; index < sampleCount; index++)
         {
             writer.Write((short)(Math.Sin(index * 0.05) * 1000));
+        }
+    }
+
+    private static void WritePcmWaveWithActivity(
+        string path,
+        int sampleRate,
+        TimeSpan duration,
+        TimeSpan activeStart,
+        TimeSpan activeEnd)
+    {
+        var sampleCount = (int)(sampleRate * duration.TotalSeconds);
+        var activeStartSample = (int)(sampleRate * activeStart.TotalSeconds);
+        var activeEndSample = (int)(sampleRate * activeEnd.TotalSeconds);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: false);
+        var dataBytes = sampleCount * sizeof(short);
+        writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+        writer.Write(36 + dataBytes);
+        writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
+        writer.Write(16);
+        writer.Write((ushort)1);
+        writer.Write((ushort)1);
+        writer.Write(sampleRate);
+        writer.Write(sampleRate * sizeof(short));
+        writer.Write((ushort)sizeof(short));
+        writer.Write((ushort)16);
+        writer.Write(Encoding.ASCII.GetBytes("data"));
+        writer.Write(dataBytes);
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var active = index >= activeStartSample && index < activeEndSample;
+            writer.Write(active ? (short)(Math.Sin(index * 0.05) * 1000) : (short)0);
+        }
+    }
+
+    private static void WriteExtensiblePcmWaveWithActivity(
+        string path,
+        int sampleRate,
+        TimeSpan duration,
+        TimeSpan activeStart,
+        TimeSpan activeEnd)
+    {
+        var sampleCount = (int)(sampleRate * duration.TotalSeconds);
+        var activeStartSample = (int)(sampleRate * activeStart.TotalSeconds);
+        var activeEndSample = (int)(sampleRate * activeEnd.TotalSeconds);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: false);
+        var dataBytes = sampleCount * sizeof(short);
+        writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+        writer.Write(60 + dataBytes);
+        writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
+        writer.Write(40);
+        writer.Write((ushort)0xFFFE);
+        writer.Write((ushort)1);
+        writer.Write(sampleRate);
+        writer.Write(sampleRate * sizeof(short));
+        writer.Write((ushort)sizeof(short));
+        writer.Write((ushort)16);
+        writer.Write((ushort)22);
+        writer.Write((ushort)16);
+        writer.Write(4u);
+        writer.Write(new Guid("00000001-0000-0010-8000-00aa00389b71").ToByteArray());
+        writer.Write(Encoding.ASCII.GetBytes("data"));
+        writer.Write(dataBytes);
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var active = index >= activeStartSample && index < activeEndSample;
+            writer.Write(active ? (short)(Math.Sin(index * 0.05) * 1000) : (short)0);
         }
     }
 }

@@ -1,19 +1,70 @@
 using System.Diagnostics;
 using System.Windows.Automation;
+using YMM4VocaloidBridge.Core;
+using YMM4VocaloidBridge.Core.Audio;
 
 namespace YMM4VocaloidBridge.Automation;
 
 public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVocaloidDriver
 {
     private static readonly SemaphoreSlim AutomationSemaphore = new(1, 1);
+    private const int EditorInitialVoiceTakeNumber = 1;
 
     private static class Id
     {
-        public const string HomeWindow = "xHomeWindow";
-        public const string MainWindow = "xMainWindow";
+        public const string HomeWindow = VocaloidStartupPromptHandler.HomeWindowAutomationId;
+        public const string MainWindow = VocaloidStartupPromptHandler.MainWindowAutomationId;
         public const string AddTrackDialog = "xAddTrackDlg";
         public const string AiTrackButton = "xAiTrackButton";
         public const string VoiceBankComboBox = "xVoiceBankComboBox";
+        public const string StyleComboBox = "xStyleComboBox";
+        public const string TakeComboBox = "xTakeComboBox";
+    }
+
+    private static class NativeMethods
+    {
+        public const uint ButtonClick = 0x00F5;
+        public const uint LeftDown = 0x0002;
+        public const uint LeftUp = 0x0004;
+
+        [Flags]
+        public enum SendMessageTimeoutFlags : uint
+        {
+            AbortIfHung = 0x0002,
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        public struct Point
+        {
+            public int X;
+            public int Y;
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool GetCursorPos(out Point point);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool SetCursorPos(int x, int y);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr windowHandle);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(
+            IntPtr windowHandle,
+            uint message,
+            IntPtr wordParameter,
+            IntPtr longParameter,
+            SendMessageTimeoutFlags flags,
+            uint timeoutMilliseconds,
+            out UIntPtr result);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        public static extern bool IsWindow(IntPtr windowHandle);
     }
 
     public async Task<VocaloidRenderResult> RenderAsync(
@@ -40,6 +91,8 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
                 TimeSpan.FromSeconds(request.Options.TimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);
             events.Add("wave-validated");
+            _ = new WaveAudioAnalyzer().Analyze(request.OutputWavePath);
+            events.Add("wave-audio-validated");
             return new VocaloidRenderResult(
                 request.OutputWavePath,
                 nameof(Vocaloid6AutomationDriver),
@@ -86,8 +139,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             ?? "unknown";
         return new VocaloidAutomationException(
             $"VOCALOID6 UI automation failed at '{stage}' "
-                + $"({exception.GetType().Name}: {exception.Message}). "
-                + "Assisted mode can continue with the generated MIDI.",
+                + $"({exception.GetType().Name}: {exception.Message}).",
             exception);
     }
 
@@ -98,14 +150,24 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         Action<AutomationElement> soloButtonReady)
     {
         events.Add("stage:attach-editor");
-        var process = AttachOrLaunch(request.Installation.EditorPath);
+        var process = VocaloidEditorProcess.AttachOrLaunch(request.Installation.EditorPath);
         events.Add("stage:dismiss-stale-dialogs");
         DismissStaleFileDialogs(process.Id);
+        ConfirmVoicebankStyleChange(process.Id, TimeSpan.FromSeconds(5), cancellationToken);
         events.Add("stage:wait-for-editor");
         var mainWindow = WaitUntil(
             () =>
             {
-                DismissUpdatePrompt(process.Id);
+                if (VocaloidStartupPromptHandler.TryDismissUnlicensedVoicePrompt(process.Id))
+                {
+                    return null;
+                }
+
+                if (DismissUpdatePrompt(process.Id))
+                {
+                    return null;
+                }
+
                 return FindProcessWindow(process.Id, Id.HomeWindow, Id.MainWindow);
             },
             TimeSpan.FromSeconds(30),
@@ -113,12 +175,182 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             "VOCALOID6 main window");
         events.Add("editor-ready");
 
+        if (IsMainWindow(mainWindow))
+        {
+            events.Add("stage:verify-owned-bridge-project");
+            EnsureDedicatedBridgeProject(mainWindow);
+            events.Add("stage:restart-owned-bridge-project");
+            process.Kill(entireProcessTree: true);
+            if (!process.WaitForExit(10_000))
+            {
+                throw new VocaloidAutomationException("The owned VOCALOID6 bridge project did not close for a clean render.");
+            }
+
+            process = VocaloidEditorProcess.AttachOrLaunch(request.Installation.EditorPath);
+            DismissStaleFileDialogs(process.Id);
+            events.Add("stage:wait-for-fresh-editor");
+            mainWindow = WaitUntil(
+                () =>
+                {
+                    if (VocaloidStartupPromptHandler.TryDismissUnlicensedVoicePrompt(process.Id))
+                    {
+                        return null;
+                    }
+
+                    if (DismissSessionRecoveryPrompt(process.Id))
+                    {
+                        return null;
+                    }
+
+                    if (DismissUpdatePrompt(process.Id))
+                    {
+                        return null;
+                    }
+
+                    return FindProcessWindow(process.Id, Id.HomeWindow, Id.MainWindow);
+                },
+                TimeSpan.FromSeconds(30),
+                cancellationToken,
+                "fresh VOCALOID6 home window");
+            if (!IsHomeWindow(mainWindow))
+            {
+                throw new VocaloidAutomationException("VOCALOID6 restored an editor project instead of opening a clean home window.");
+            }
+
+            events.Add("fresh-editor-ready");
+        }
+
         events.Add("stage:ensure-project");
-        EnsureProjectAndVoicebank(mainWindow, request.Options.VoicebankName, cancellationToken);
-        events.Add("voicebank-selected");
+        EnsureProjectAndVoicebank(
+            mainWindow,
+            request.Options.VoicebankName,
+            cancellationToken);
+        events.Add("stage:refresh-editor-window");
+        mainWindow = WaitUntil(
+            () => FindProcessWindow(process.Id, Id.MainWindow),
+            TimeSpan.FromSeconds(15),
+            cancellationToken,
+            "VOCALOID6 editor window after project setup");
         events.Add("stage:import-midi");
-        ImportMidi(mainWindow, request.Artifacts.MidiPath, request.Options.VoicebankName, cancellationToken);
+        var importVoicebankSelected = ImportMidi(
+            mainWindow,
+            request.Artifacts.MidiPath,
+            request.Options.VoicebankName,
+            cancellationToken);
         events.Add("midi-imported");
+        var preserveOriginalStyle = string.Equals(
+            request.Options.VoiceStyleName,
+            BridgeOptions.DefaultVoiceStyleName,
+            StringComparison.OrdinalIgnoreCase);
+        if (!importVoicebankSelected
+            || !preserveOriginalStyle
+            || request.Options.VoiceTakeNumber != EditorInitialVoiceTakeNumber)
+        {
+            events.Add("stage:focus-imported-track");
+            FocusLastTrack(mainWindow);
+            events.Add("imported-track-focused");
+        }
+        else
+        {
+            events.Add("imported-track-original-settings-preserved");
+            Thread.Sleep(5_000);
+            events.Add("imported-track-render-ready");
+        }
+
+        events.Add("stage:select-imported-track-voicebank");
+        var trackVoicebankSelected = false;
+        if (!importVoicebankSelected)
+        {
+            using var styleWatcherCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var styleWatcher = Task.Run(
+                () => ConfirmVoicebankStyleChange(
+                    process.Id,
+                    TimeSpan.FromSeconds(30),
+                    styleWatcherCancellation.Token),
+                styleWatcherCancellation.Token);
+            try
+            {
+                trackVoicebankSelected = SelectProcessComboBoxItem(
+                    process.Id,
+                    Id.VoiceBankComboBox,
+                    request.Options.VoicebankName,
+                    cancellationToken,
+                    confirmVoicebankStyleChange: true);
+                events.Add("stage:confirm-imported-track-style");
+                _ = styleWatcher.Wait(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                styleWatcherCancellation.Cancel();
+            }
+        }
+        else
+        {
+            events.Add("voicebank-selected-during-import");
+        }
+        events.Add("stage:verify-imported-track-voicebank");
+        var assignedVoicebankConfirmed = IsVoicebankAssigned(mainWindow, request.Options.VoicebankName);
+        if (!importVoicebankSelected
+            && !trackVoicebankSelected
+            && !assignedVoicebankConfirmed)
+        {
+            throw new VocaloidAutomationException(
+                $"VOCALOID6 did not expose a verifiable '{request.Options.VoicebankName}' selection during project setup or MIDI import.");
+        }
+
+        events.Add("voicebank-selected");
+        events.Add("voicebank-selected-and-verified");
+        if (preserveOriginalStyle)
+        {
+            events.Add("voice-style-original-preserved");
+        }
+        else
+        {
+            events.Add("stage:select-voice-style");
+            if (!SelectProcessComboBoxItem(
+                process.Id,
+                Id.StyleComboBox,
+                request.Options.VoiceStyleName,
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(15),
+                usePointerClick: false,
+                verifySelection: true))
+            {
+                throw new VocaloidAutomationException(
+                    $"VOCALOID6 style '{request.Options.VoiceStyleName}' could not be selected for the imported track.");
+            }
+
+            events.Add("voice-style-selected");
+            Thread.Sleep(2_000);
+            events.Add("voice-style-ready");
+        }
+
+        if (request.Options.VoiceTakeNumber == EditorInitialVoiceTakeNumber)
+        {
+            events.Add("voice-take-default-preserved");
+        }
+        else
+        {
+            events.Add("stage:select-voice-take");
+            var takeName = $"Take{request.Options.VoiceTakeNumber}";
+            if (!SelectProcessComboBoxItem(
+                process.Id,
+                Id.TakeComboBox,
+                takeName,
+                cancellationToken,
+                timeout: TimeSpan.FromSeconds(15),
+                usePointerClick: false,
+                verifySelection: true))
+            {
+                throw new VocaloidAutomationException(
+                    $"VOCALOID6 take '{takeName}' could not be selected for the imported track.");
+            }
+
+            events.Add("voice-take-selected");
+            Thread.Sleep(5_000);
+            events.Add("voice-take-ready");
+        }
+
         events.Add("stage:enable-solo");
         var soloButton = EnableSoloForLastTrack(mainWindow);
         soloButtonReady(soloButton);
@@ -182,17 +414,38 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         }
     }
 
-    private static void DismissUpdatePrompt(int processId)
+    private static bool DismissUpdatePrompt(int processId)
     {
         var declineButton = FindProcessElementByAutomationId(processId, "donotUpdateButton");
         if (declineButton is null)
         {
-            return;
+            var processCondition = new PropertyCondition(AutomationElement.ProcessIdProperty, processId);
+            foreach (AutomationElement root in AutomationElement.RootElement.FindAll(TreeScope.Children, processCondition))
+            {
+                if (!IsUpdatePrompt(root))
+                {
+                    continue;
+                }
+
+                declineButton = FindShallowButton(root, ["いいえ", "No"], depth: 0, maximumDepth: 4);
+                if (declineButton is not null)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (declineButton is null)
+        {
+            return false;
         }
 
         try
         {
-            Invoke(declineButton);
+            if (declineButton.Current.IsEnabled)
+            {
+                Invoke(declineButton);
+            }
         }
         catch (ElementNotAvailableException)
         {
@@ -200,64 +453,272 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         catch (ElementNotEnabledException)
         {
         }
+
+        return true;
     }
 
-    private static Process AttachOrLaunch(string editorPath)
+    private static bool DismissSessionRecoveryPrompt(int processId)
     {
-        var process = Process.GetProcessesByName("VOCALOID6").FirstOrDefault();
-        if (process is not null)
+        var processCondition = new PropertyCondition(AutomationElement.ProcessIdProperty, processId);
+        foreach (AutomationElement root in AutomationElement.RootElement.FindAll(TreeScope.Children, processCondition))
         {
-            return process;
+            if (!IsSessionRecoveryPrompt(root))
+            {
+                continue;
+            }
+
+            var decline = FindShallowButton(
+                root,
+                ["復元しない", "いいえ", "Don't Restore", "Discard", "No"],
+                depth: 0,
+                maximumDepth: 4);
+            if (decline is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                Invoke(decline);
+                return true;
+            }
+            catch (ElementNotAvailableException)
+            {
+                return true;
+            }
+            catch (ElementNotEnabledException)
+            {
+                return false;
+            }
         }
 
-        var startInfo = new ProcessStartInfo(editorPath)
+        return false;
+    }
+
+    private static bool IsSessionRecoveryPrompt(AutomationElement root)
+    {
+        static bool ContainsRecoveryText(string value) =>
+            (value.Contains("セッション", StringComparison.OrdinalIgnoreCase)
+                && value.Contains("復元", StringComparison.OrdinalIgnoreCase))
+            || (value.Contains("プロジェクト", StringComparison.OrdinalIgnoreCase)
+                && value.Contains("回復", StringComparison.OrdinalIgnoreCase))
+            || value.Contains("restore the previous session", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("recover the project", StringComparison.OrdinalIgnoreCase);
+
+        try
         {
-            UseShellExecute = false,
-            WorkingDirectory = Path.GetDirectoryName(editorPath)!,
-        };
-        var systemDotnetRoot = FindSystemDotnetRoot(requiredMajorVersion: 8);
-        if (systemDotnetRoot is not null)
-        {
-            startInfo.Environment["DOTNET_ROOT"] = systemDotnetRoot;
-            startInfo.Environment["DOTNET_ROOT_X64"] = systemDotnetRoot;
-            startInfo.Environment.Remove("DOTNET_HOST_PATH");
+            return ContainsRecoveryText(root.Current.Name)
+                || FindAllDescendants(root, ControlType.Text)
+                    .Any(element => ContainsRecoveryText(element.Current.Name));
         }
-
-        return Process.Start(startInfo)
-            ?? throw new VocaloidAutomationException("VOCALOID6 Editor could not be started.");
-    }
-
-    private static string? FindSystemDotnetRoot(int requiredMajorVersion)
-    {
-        var dotnetRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "dotnet");
-        return HasRuntime(dotnetRoot, "Microsoft.NETCore.App", requiredMajorVersion)
-            && HasRuntime(dotnetRoot, "Microsoft.WindowsDesktop.App", requiredMajorVersion)
-                ? dotnetRoot
-                : null;
-    }
-
-    private static bool HasRuntime(string dotnetRoot, string frameworkName, int requiredMajorVersion)
-    {
-        var sharedDirectory = Path.Combine(dotnetRoot, "shared", frameworkName);
-        if (!Directory.Exists(sharedDirectory))
+        catch (ElementNotAvailableException)
         {
             return false;
         }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
+        }
+    }
 
-        return Directory.EnumerateDirectories(sharedDirectory)
-            .Select(Path.GetFileName)
-            .Any(name => Version.TryParse(name, out var version) && version.Major == requiredMajorVersion);
+    private static bool IsUpdatePrompt(AutomationElement root)
+    {
+        static bool ContainsUpdateText(string value) =>
+            value.Contains("アップデート", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("更新", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("update", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            return ContainsUpdateText(root.Current.Name)
+                || FindAllDescendants(root, ControlType.Text).Any(element => ContainsUpdateText(element.Current.Name));
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
+        }
     }
 
     private static AutomationElement? FindProcessWindow(int processId, params string[] automationIds)
     {
         var processCondition = new PropertyCondition(AutomationElement.ProcessIdProperty, processId);
-        return AutomationElement.RootElement
+        var roots = AutomationElement.RootElement
             .FindAll(TreeScope.Children, processCondition)
             .Cast<AutomationElement>()
-            .FirstOrDefault(x => automationIds.Contains(x.Current.AutomationId, StringComparer.Ordinal));
+            .ToArray();
+        var identified = roots.FirstOrDefault(x => automationIds.Contains(x.Current.AutomationId, StringComparer.Ordinal));
+        if (identified is not null)
+        {
+            return identified;
+        }
+
+        var idCondition = new OrCondition(automationIds
+            .Select(id => new PropertyCondition(AutomationElement.AutomationIdProperty, id))
+            .Cast<Condition>()
+            .ToArray());
+        identified = roots
+            .Select(root => root.FindFirst(TreeScope.Descendants, idCondition))
+            .FirstOrDefault(element => element is not null);
+        if (identified is not null)
+        {
+            return identified;
+        }
+
+        if (automationIds.Contains(Id.MainWindow, StringComparer.Ordinal))
+        {
+            var editor = roots.FirstOrDefault(IsMainWindow);
+            if (editor is not null)
+            {
+                return editor;
+            }
+        }
+
+        return automationIds.Contains(Id.HomeWindow, StringComparer.Ordinal)
+            ? roots.FirstOrDefault(IsHomeWindow)
+            : null;
+    }
+
+    private static bool ConfirmVoicebankStyleChange(
+        int processId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AutomationElement? button = null;
+            try
+            {
+                button = FindShallowProcessButton(
+                    processId,
+                    "スタイルを変更する",
+                    "Change Style");
+            }
+            catch (ElementNotAvailableException)
+            {
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+            }
+            if (button is not null)
+            {
+                try
+                {
+                    ClickElement(button);
+                    return true;
+                }
+                catch (ElementNotAvailableException)
+                {
+                }
+                catch (ElementNotEnabledException)
+                {
+                }
+                catch (System.Runtime.InteropServices.COMException)
+                {
+                }
+            }
+
+            if (timeout == TimeSpan.Zero)
+            {
+                return false;
+            }
+
+            Thread.Sleep(200);
+        }
+        while (stopwatch.Elapsed < timeout);
+
+        return false;
+    }
+
+    private static AutomationElement? FindShallowProcessButton(int processId, params string[] names)
+    {
+        var processCondition = new PropertyCondition(AutomationElement.ProcessIdProperty, processId);
+        foreach (AutomationElement root in AutomationElement.RootElement.FindAll(TreeScope.Children, processCondition))
+        {
+            var match = FindShallowButton(root, names, depth: 0, maximumDepth: 4);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static AutomationElement? FindShallowButton(
+        AutomationElement element,
+        IReadOnlyCollection<string> names,
+        int depth,
+        int maximumDepth)
+    {
+        if (depth > maximumDepth)
+        {
+            return null;
+        }
+
+        try
+        {
+            var normalizedName = element.Current.Name.TrimStart('_');
+            if (element.Current.ControlType == ControlType.Button
+                && names.Any(name => string.Equals(normalizedName, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return element;
+            }
+
+            var child = TreeWalker.ControlViewWalker.GetFirstChild(element);
+            while (child is not null)
+            {
+                var match = FindShallowButton(child, names, depth + 1, maximumDepth);
+                if (match is not null)
+                {
+                    return match;
+                }
+
+                child = TreeWalker.ControlViewWalker.GetNextSibling(child);
+            }
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
+
+        return null;
+    }
+
+    private static bool IsMainWindow(AutomationElement window)
+    {
+        try
+        {
+            return string.Equals(window.Current.AutomationId, Id.MainWindow, StringComparison.Ordinal)
+                || FindDescendantByAutomationId(window, "xMainMenu") is not null
+                || FindDescendantByAutomationId(window, "xTrackEditorDiv") is not null
+                || FindDescendantByAutomationId(window, "xTrackName") is not null;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsHomeWindow(AutomationElement window)
+    {
+        try
+        {
+            return string.Equals(window.Current.AutomationId, Id.HomeWindow, StringComparison.Ordinal)
+                || FindByNames(window, ControlType.Button, "NEW PROJECT", "新規プロジェクト", "New Project") is not null
+                || FindButtonByDescendantText(window, "NEW PROJECT", "新規プロジェクト", "New Project") is not null;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
     }
 
     private static void EnsureProjectAndVoicebank(
@@ -265,18 +726,12 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         string voicebankName,
         CancellationToken cancellationToken)
     {
-        AutomationElement? addTrack = null;
-        if (mainWindow.Current.AutomationId == Id.MainWindow)
+        if (IsMainWindow(mainWindow))
         {
-            EnsureDedicatedBridgeProject(mainWindow);
-            addTrack = FindProcessElementByAutomationId(mainWindow.Current.ProcessId, Id.AddTrackDialog);
-            if (addTrack is null)
-            {
-                return;
-            }
+            throw new VocaloidAutomationException("A clean VOCALOID6 home window is required before creating the bridge project.");
         }
 
-        if (mainWindow.Current.AutomationId == Id.HomeWindow)
+        if (IsHomeWindow(mainWindow))
         {
             var newProject = FindByNames(mainWindow, ControlType.Button, "NEW PROJECT", "新規プロジェクト", "New Project")
                 ?? FindButtonByDescendantText(mainWindow, "NEW PROJECT", "新規プロジェクト", "New Project")
@@ -284,7 +739,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             Invoke(newProject);
         }
 
-        addTrack ??= WaitUntil(
+        var addTrack = WaitUntil(
                 () => FindProcessElementByAutomationId(mainWindow.Current.ProcessId, Id.AddTrackDialog),
                 TimeSpan.FromSeconds(15),
                 cancellationToken,
@@ -299,7 +754,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         InvokeButton(addTrack, "作成", "Create", "OK");
     }
 
-    private static void ImportMidi(
+    private static bool ImportMidi(
         AutomationElement mainWindow,
         string midiPath,
         string voicebankName,
@@ -338,13 +793,18 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         var mappingDialog = FindTransientWindow(mainWindow, cancellationToken, TimeSpan.FromSeconds(5));
         if (mappingDialog is not null)
         {
-            foreach (var comboBox in FindAllDescendants(mappingDialog, ControlType.ComboBox))
+            var comboBoxes = FindAllDescendants(mappingDialog, ControlType.ComboBox).ToArray();
+            var selected = false;
+            foreach (var comboBox in comboBoxes)
             {
-                SelectComboBoxItem(comboBox, voicebankName, required: false);
+                selected |= SelectComboBoxItem(comboBox, voicebankName, required: false);
             }
 
             InvokeButton(mappingDialog, "OK", "適用", "Apply", "インポート", "Import");
+            return selected;
         }
+
+        return false;
     }
 
     private static void ExportWave(
@@ -415,7 +875,60 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         }
 
         ((ValuePattern)valuePattern).SetValue(path);
-        InvokeButton(dialog, isSaveDialog ? ["保存", "Save"] : ["開く", "Open"]);
+        InvokeFileDialogAcceptButton(dialog, isSaveDialog);
+    }
+
+    private static void InvokeFileDialogAcceptButton(AutomationElement dialog, bool isSaveDialog)
+    {
+        var expectedNames = isSaveDialog ? new[] { "保存", "Save" } : new[] { "開く", "Open" };
+        var acceptCondition = new AndCondition(
+            new PropertyCondition(AutomationElement.AutomationIdProperty, "1"),
+            new PropertyCondition(AutomationElement.ClassNameProperty, "Button"));
+        var accept = dialog.FindFirst(TreeScope.Descendants, acceptCondition)
+            ?? throw new VocaloidAutomationException(
+                $"Expected file-dialog button was not found: {string.Join(" / ", expectedNames)}");
+        var acceptName = accept.Current.Name.TrimStart('_');
+        if (!expectedNames.Any(name =>
+                string.Equals(acceptName, name, StringComparison.OrdinalIgnoreCase)
+                || acceptName.StartsWith(name + "(", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new VocaloidAutomationException(
+                $"Unexpected file-dialog button: {acceptName}");
+        }
+
+        var dialogHandle = new IntPtr(dialog.Current.NativeWindowHandle);
+        var buttonHandle = new IntPtr(accept.Current.NativeWindowHandle);
+        if (dialogHandle == IntPtr.Zero || buttonHandle == IntPtr.Zero)
+        {
+            throw new VocaloidAutomationException("The file-dialog button does not have a native window handle.");
+        }
+
+        if (accept.TryGetCurrentPattern(InvokePattern.Pattern, out var invokePattern))
+        {
+            ((InvokePattern)invokePattern).Invoke();
+        }
+        else if (NativeMethods.SendMessageTimeout(
+            buttonHandle,
+            NativeMethods.ButtonClick,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            NativeMethods.SendMessageTimeoutFlags.AbortIfHung,
+            2_000,
+            out _) == IntPtr.Zero)
+        {
+            throw new VocaloidAutomationException("The file-dialog button did not accept the click message.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(5) && NativeMethods.IsWindow(dialogHandle))
+        {
+            Thread.Sleep(50);
+        }
+
+        if (NativeMethods.IsWindow(dialogHandle))
+        {
+            throw new VocaloidAutomationException("The file dialog remained open after its accept button was invoked.");
+        }
     }
 
     private static AutomationElement? FindTransientWindow(
@@ -441,6 +954,14 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         {
             return null;
         }
+        catch (ElementNotAvailableException)
+        {
+            return null;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null;
+        }
     }
 
     private static void EnsureDedicatedBridgeProject(AutomationElement mainWindow)
@@ -453,6 +974,12 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        if (!trackNames.Any(x => x.StartsWith("YMM4 Vocaloid Bridge", StringComparison.Ordinal)))
+        {
+            throw new VocaloidAutomationException(
+                "The open VOCALOID6 project is not owned by YMM4 Vocaloid Bridge. Close or save it before automatic rendering.");
+        }
+
         if (trackNames.Any(x => !x.StartsWith("YMM4 Vocaloid Bridge", StringComparison.Ordinal)
             && !string.Equals(x, "VOCALOID:AI", StringComparison.Ordinal)))
         {
@@ -472,6 +999,45 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
 
     private static AutomationElement EnableSoloForLastTrack(AutomationElement mainWindow)
     {
+        ScrollTrackHeadersToEnd(mainWindow);
+
+        var condition = new PropertyCondition(AutomationElement.AutomationIdProperty, "xSoloButton");
+        var soloButton = mainWindow.FindAll(TreeScope.Descendants, condition)
+            .Cast<AutomationElement>()
+            .LastOrDefault(x => x.Current.IsEnabled)
+            ?? throw new VocaloidAutomationException("The imported track Solo button was not found.");
+        SetToggle(soloButton, true);
+        return soloButton;
+    }
+
+    private static void FocusLastTrack(AutomationElement mainWindow)
+    {
+        ScrollTrackHeadersToEnd(mainWindow);
+        var numberCondition = new PropertyCondition(
+            AutomationElement.AutomationIdProperty,
+            "xMIDIHeaderControlTrackNumberTextBlock");
+        var trackNumber = mainWindow.FindAll(TreeScope.Descendants, numberCondition)
+            .Cast<AutomationElement>()
+            .LastOrDefault(element => element.Current.IsEnabled && !element.Current.IsOffscreen)
+            ?? throw new VocaloidAutomationException("The imported track header was not found.");
+
+        var header = TreeWalker.ControlViewWalker.GetParent(trackNumber);
+        while (header is not null
+            && !string.Equals(header.Current.ClassName, "MidiHeaderControl", StringComparison.Ordinal))
+        {
+            header = TreeWalker.ControlViewWalker.GetParent(header);
+        }
+
+        if (header is null)
+        {
+            throw new VocaloidAutomationException("The imported track header container was not found.");
+        }
+
+        ClickElement(header);
+    }
+
+    private static void ScrollTrackHeadersToEnd(AutomationElement mainWindow)
+    {
         var headerViewer = FindDescendantByAutomationId(mainWindow, "xHeaderViewer");
         if (headerViewer?.TryGetCurrentPattern(ScrollPattern.Pattern, out var scrollPattern) == true)
         {
@@ -482,14 +1048,6 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
                 Thread.Sleep(250);
             }
         }
-
-        var condition = new PropertyCondition(AutomationElement.AutomationIdProperty, "xSoloButton");
-        var soloButton = mainWindow.FindAll(TreeScope.Descendants, condition)
-            .Cast<AutomationElement>()
-            .LastOrDefault(x => x.Current.IsEnabled)
-            ?? throw new VocaloidAutomationException("The imported track Solo button was not found.");
-        SetToggle(soloButton, true);
-        return soloButton;
     }
 
     private static void SetToggle(AutomationElement element, bool desiredValue)
@@ -516,8 +1074,15 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
 
     private static AutomationElement? FindProcessElementByAutomationId(int processId, string automationId)
     {
-        return FindAllForProcess(processId, controlType: null)
-            .FirstOrDefault(x => string.Equals(x.Current.AutomationId, automationId, StringComparison.Ordinal));
+        var processCondition = new PropertyCondition(AutomationElement.ProcessIdProperty, processId);
+        var idCondition = new PropertyCondition(AutomationElement.AutomationIdProperty, automationId);
+        return AutomationElement.RootElement
+            .FindAll(TreeScope.Children, processCondition)
+            .Cast<AutomationElement>()
+            .Select(root => string.Equals(root.Current.AutomationId, automationId, StringComparison.Ordinal)
+                ? root
+                : root.FindFirst(TreeScope.Descendants, idCondition))
+            .FirstOrDefault(element => element is not null);
     }
 
     private static AutomationElement? FindByNames(
@@ -626,31 +1191,214 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         throw new VocaloidAutomationException($"UI element '{element.Current.Name}' cannot be invoked.");
     }
 
-    private static void SelectComboBoxItem(AutomationElement comboBox, string itemName, bool required = true)
+    private static bool SelectComboBoxItem(
+        AutomationElement comboBox,
+        string itemName,
+        bool required = true,
+        bool usePointerClick = false)
     {
+        ExpandCollapsePattern? expandCollapsePattern = null;
         if (comboBox.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var expandPattern))
         {
-            ((ExpandCollapsePattern)expandPattern).Expand();
+            expandCollapsePattern = (ExpandCollapsePattern)expandPattern;
+            expandCollapsePattern.Expand();
         }
 
-        var item = FindAllDescendants(comboBox, ControlType.ListItem)
-            .FirstOrDefault(x => MatchesListItemName(x, itemName))
-            ?? FindAllForProcess(comboBox.Current.ProcessId, ControlType.ListItem)
-                .FirstOrDefault(x => MatchesListItemName(x, itemName));
+        var candidates = FindAllDescendants(comboBox, ControlType.ListItem)
+            .Concat(FindAllForProcess(comboBox.Current.ProcessId, ControlType.ListItem))
+            .Where(x => MatchesListItemName(x, itemName))
+            .ToArray();
+        var item = usePointerClick
+            ? candidates.FirstOrDefault()
+            : candidates.FirstOrDefault(SupportsSelectionItemPattern)
+                ?? candidates.FirstOrDefault();
         if (item is null)
         {
+            TryCollapse(expandCollapsePattern);
             if (required)
             {
                 throw new VocaloidAutomationException($"Voicebank '{itemName}' was not listed by VOCALOID6.");
             }
 
+            return false;
+        }
+
+        if (usePointerClick)
+        {
+            ClickElement(item);
+        }
+        else
+        {
+            Invoke(item);
+        }
+
+        TryCollapse(expandCollapsePattern);
+        return true;
+    }
+
+    private static void TryCollapse(ExpandCollapsePattern? expandCollapsePattern)
+    {
+        if (expandCollapsePattern is null)
+        {
             return;
         }
 
-        Invoke(item);
-        if (comboBox.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out expandPattern))
+        try
         {
-            ((ExpandCollapsePattern)expandPattern).Collapse();
+            expandCollapsePattern.Collapse();
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (ElementNotEnabledException)
+        {
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
+    }
+
+    private static void ClickElement(AutomationElement element)
+    {
+        var rectangle = element.Current.BoundingRectangle;
+        if (rectangle.IsEmpty
+            || double.IsInfinity(rectangle.X)
+            || double.IsInfinity(rectangle.Y))
+        {
+            throw new VocaloidAutomationException($"UI element '{element.Current.Name}' does not have a clickable position.");
+        }
+
+        var process = Process.GetProcessById(element.Current.ProcessId);
+        _ = NativeMethods.SetForegroundWindow(process.MainWindowHandle);
+        Thread.Sleep(100);
+        var restoreCursor = NativeMethods.GetCursorPos(out var originalPosition);
+        try
+        {
+            _ = NativeMethods.SetCursorPos(
+                (int)Math.Round(rectangle.Left + (rectangle.Width / 2)),
+                (int)Math.Round(rectangle.Top + (rectangle.Height / 2)));
+            NativeMethods.mouse_event(NativeMethods.LeftDown, 0, 0, 0, UIntPtr.Zero);
+            NativeMethods.mouse_event(NativeMethods.LeftUp, 0, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(150);
+        }
+        finally
+        {
+            if (restoreCursor)
+            {
+                _ = NativeMethods.SetCursorPos(originalPosition.X, originalPosition.Y);
+            }
+        }
+    }
+
+    private static bool SelectProcessComboBoxItem(
+        int processId,
+        string automationId,
+        string itemName,
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null,
+        bool confirmVoicebankStyleChange = false,
+        bool usePointerClick = true,
+        bool verifySelection = false)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < (timeout ?? TimeSpan.FromSeconds(15)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var comboBox = FindProcessElementByAutomationId(processId, automationId);
+                if (comboBox is not null
+                    && SelectComboBoxItem(comboBox, itemName, required: false, usePointerClick: usePointerClick)
+                    && (!verifySelection
+                        || IsProcessComboBoxItemSelected(processId, automationId, itemName)))
+                {
+                    return true;
+                }
+            }
+            catch (ElementNotAvailableException)
+            {
+            }
+            catch (ElementNotEnabledException)
+            {
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+            }
+
+            if (confirmVoicebankStyleChange
+                && ConfirmVoicebankStyleChange(processId, TimeSpan.Zero, cancellationToken))
+            {
+                return true;
+            }
+
+            Thread.Sleep(250);
+        }
+
+        return false;
+    }
+
+    private static bool IsProcessComboBoxItemSelected(
+        int processId,
+        string automationId,
+        string itemName)
+    {
+        var comboBox = FindProcessElementByAutomationId(processId, automationId);
+        if (comboBox is null)
+        {
+            return false;
+        }
+
+        ExpandCollapsePattern? expandCollapsePattern = null;
+        try
+        {
+            if (comboBox.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var expandPattern))
+            {
+                expandCollapsePattern = (ExpandCollapsePattern)expandPattern;
+                expandCollapsePattern.Expand();
+                Thread.Sleep(150);
+            }
+
+            return FindAllDescendants(comboBox, ControlType.ListItem)
+                .Concat(FindAllForProcess(processId, ControlType.ListItem))
+                .Where(item => MatchesListItemName(item, itemName))
+                .Any(IsSelectedListItem);
+        }
+        finally
+        {
+            TryCollapse(expandCollapsePattern);
+        }
+    }
+
+    private static bool SupportsSelectionItemPattern(AutomationElement item)
+    {
+        try
+        {
+            return item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out _);
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSelectedListItem(AutomationElement item)
+    {
+        try
+        {
+            return item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionPattern)
+                && ((SelectionItemPattern)selectionPattern).Current.IsSelected;
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
         }
     }
 
@@ -663,6 +1411,54 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
                     .Any(x => x.Current.Name.Contains(itemName, StringComparison.OrdinalIgnoreCase));
         }
         catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsVoicebankAssigned(AutomationElement root, string voicebankName)
+    {
+        try
+        {
+            if (FindAllDescendants(root, ControlType.Text)
+                .Any(element => element.Current.Name.Contains(voicebankName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            foreach (var comboBox in FindAllDescendants(root, ControlType.ComboBox))
+            {
+                if (comboBox.Current.Name.Contains(voicebankName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (comboBox.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePattern)
+                    && ((ValuePattern)valuePattern).Current.Value.Contains(
+                        voicebankName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (comboBox.TryGetCurrentPattern(SelectionPattern.Pattern, out var selectionPattern)
+                    && ((SelectionPattern)selectionPattern).Current.GetSelection()
+                        .Any(item => MatchesListItemName(item, voicebankName)))
+                {
+                    return true;
+                }
+            }
+
+            return FindAllDescendants(root, ControlType.ListItem)
+                .Any(item => item.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionItemPattern)
+                    && ((SelectionItemPattern)selectionItemPattern).Current.IsSelected
+                    && MatchesListItemName(item, voicebankName));
+        }
+        catch (ElementNotAvailableException)
+        {
+            return false;
+        }
+        catch (System.Runtime.InteropServices.COMException)
         {
             return false;
         }

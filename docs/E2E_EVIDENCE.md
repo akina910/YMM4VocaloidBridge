@@ -1,79 +1,162 @@
 # End-to-End Evidence
 
-Date: 2026-07-13
+Date: 2026-07-14
 
-Status: **PASS for beta compatibility target**
+Status: **beta.3 superseded; beta.4 listener acceptance pending**
+
+The earlier beta.3 `PASS` claim covered plugin loading, automatic WAVE generation,
+cache reuse, and native YMM4 lip-sync frames, but did not require an
+intelligibility or listening gate. That completion claim is withdrawn. This
+document records the beta.4 quality rework without treating file creation as
+proof that the voice is usable.
+
+No test or package input contains a VOCALOID voicebank, character image,
+credential, or authentication data. All renders use the user's installed
+`HATSUNE_MIKU_V6_ORIGINAL` voicebank.
 
 ## Environment
 
-| Component | Version |
+| Component | Verified version |
 | --- | --- |
 | Windows 11 | build 26200 |
 | .NET SDK | 10.0.301 |
 | YMM4 | 4.54.0.1 |
 | VOCALOID6 Editor | 6.12.0.1, Japanese UI |
 | HATSUNE MIKU V6 | 6.12.0, `HATSUNE_MIKU_V6_ORIGINAL` |
+| ASR audit | Whisper medium, Japanese |
 
-## HATSUNE MIKU V6 ORIGINAL verification
+## beta.4 defects reproduced and fixed
 
-One short Japanese dialogue (`初音ミクです。よろしくお願いします。`) was rendered through the complete automatic path with `HATSUNE_MIKU_V6_ORIGINAL` explicitly selected.
+- The beta.3 planner used a periodic pitch pattern, four mora per second, and a
+  gap after every note. It sounded sung and segmented rather than conversational.
+- VOCALOID6 could accumulate imported bridge parts across requests, allowing a
+  previous request to affect a later export.
+- A pointer click reported style-selection success while the actual selected
+  item remained `No Effect*`.
+- One structurally valid 3.923-second WAVE contained only approximately -91 dB
+  signal. The old CLI accepted it because it checked RIFF structure, not speech
+  activity.
 
-Result: **passed in 20.4 seconds with no assisted fallback**.
+The driver now verifies bridge-project ownership, starts each render from a
+fresh project, preserves the imported ORIGINAL style, verifies custom style and
+Take selections through `SelectionItemPattern`, and rejects silent or
+below-floor audio before returning success.
+
+## Intelligibility audit
+
+The final candidate uses 130 BPM, 160 ticks per mora, connected notes, flat
+statement pitch, a one-semitone question ending, a closed-mouth timing gap for
+sokuon, and VOCALOID:AI `Take10`.
+
+Ten separate real VOCALOID6 renders of the same difficult sentence were made,
+one for each Take. Takes 1 through 9 were recognized as
+`ま、ではもう一度ゆっくり確認します`. Take 10 alone was recognized exactly:
+
+```text
+Expected: 待って、もう一度ゆっくり確認します。
+Take10:   待って、もう一度ゆっくり確認します
+```
+
+Cross-sentence checks found that Take 10 is an improvement, not a complete TTS
+substitute:
+
+```text
+Expected: 本当にこれで大丈夫？うん、ちゃんと聞こえているよ。
+ASR:      本当は鬼これて大丈夫 / うん、ちゃんと聞こえているよ
+
+Expected: こんにちは、初音ミクです。今日は一緒に話そうね？
+ASR:      こんやちははずねみくです / 今日は一緒に話そうね
+```
+
+These remaining consonant and proper-name errors are recorded rather than
+reported as a pass. The generated samples must be listened to in the installed
+YMM4 flow before beta.4 can be called complete.
+
+## Packaged YMM4 verification
+
+The clean source commit `22bab9f5d0ff25619deb56a1ff3ebfef17751d94` was
+packaged as `0.1.0-beta.4`. Both the installed plugin and bundled self-contained
+CLI report that revision in `ProductVersion`. The bundled doctor reported
+`ready: true` for YMM4 4.54.0.1, VOCALOID6 Editor 6.12.0.1, and HATSUNE MIKU V6
+6.12.0.
+
+The real YMM4 project rendered `こんにちは、初音ミクです。` through the installed
+plugin with no assisted fallback:
 
 | Measurement | Result |
 | --- | --- |
-| Output size | 923,388 bytes |
-| Format | RIFF/WAVE PCM, stereo, 44.1 kHz |
-| SHA-256 | `5840963892DDEAA36822E05F764C6CAFDCF4381AC175920D6D1AB32625670A30` |
+| Driver | `Vocaloid6AutomationDriver` |
+| Assisted fallback | `false` |
+| Sequence / lip sync | 12 notes / 15 native YMM4 frames |
+| Active audio | 110 ms through 2,125.0113 ms |
+| Format | PCM signed 16-bit, stereo, 44.1 kHz |
+| Output size | 374,896 bytes |
+| SHA-256 | `2AE76DFBAA2025585FD29E9F0705DF53934DBB462E43E5885CD1E5B316C94455` |
+| Whisper medium | `こんやちははずね肉です` |
 
-The run also verified automatic dismissal of VOCALOID6's optional update prompt, the child-text based `NEW PROJECT` control, the child-text based ORIGINAL voicebank entry, MIDI import, Solo isolation, Audio Mixdown, Solo restoration, and final WAVE validation.
+After restarting YMM4 with the same project, the beta.4 cache restored the same
+audio and all 15 lip-sync frames without another VOCALOID6 render. YMM4 was left
+open and responsive; the bridge-owned VOCALOID6 project was closed afterward.
 
-## Automatic render soak baseline
+The package contains 20 allow-listed files and no YMM4 assemblies, VOCALOID
+binaries, voicebanks, images, credentials, generated audio, MIDI, or local user
+paths. Package size is 78,771,860 bytes and SHA-256 is
+`3F5EF2AFF18922A441A3C0421986A1ACFCDE5851457874C71E2F355F1FFCBDD3`.
 
-Before the ORIGINAL target was fixed, twenty different short Japanese dialogues were rendered consecutively through the complete automatic path with `HATSUNE_MIKU_V6_SOFT`. This is retained as an automation stability baseline, not as ORIGINAL voicebank evidence:
+## beta.5 robot-speech timing verification
 
-1. Kuromoji reading and mora generation
-2. deterministic dialogue note planning
-3. Type 1 Standard MIDI with UTF-8 lyrics
-4. VOCALOID6 MIDI import and VOCALOID:AI mapping
-5. latest bridge track Solo isolation
-6. Audio Mixdown to the requested absolute path
-7. Solo restoration and PCM WAV validation
+The product target changed from natural conversation and lip-sync-first output
+to standalone Hatsune Miku robot speech, with YMM4 retained as an optional
+integration. The standalone `speak` path and the YMM4 speaker now use the same
+`RobotSpeechSequencePlanner`.
 
-Result: **20/20 passed, 100%, no assisted fallback**. The run took 849.9 seconds. The M3 threshold was at least 95% over 20 consecutive cases.
+An initial robot-speech candidate used 240 ticks per mora at 120 BPM. A real
+automatic VOCALOID6 render of `こんにちは、初音ミクです。` completed without
+assisted fallback, but its 3.675011-second duration was rejected by listener
+feedback as syllable-by-syllable elongation.
+
+The corrected default uses 144 ticks per mora at 120 BPM, a 12-tick note gap,
+minimal word-boundary spacing, and only small duration extensions for `ン` and
+`ツ`. The same real automatic render then produced:
 
 | Measurement | Result |
 | --- | --- |
-| Validated WAV count | 20 |
-| Minimum size | 430,020 bytes |
-| Maximum size | 658,788 bytes |
-| Total size | 10,496,688 bytes |
-| Quietest peak | -3.8 dB |
-| Loudest peak | 0.0 dB |
-| First WAV SHA-256 | `1A6FCF9B829F95A0154EDFAC5F40847DECD744FC3369564A851C0600BF6ECD59` |
-| Last WAV SHA-256 | `A24177588FF2ACD1DFEE1C2A9FBE94D20E563020E3105A1AE4A4FA340823B570` |
+| Driver | `Vocaloid6AutomationDriver` |
+| Assisted fallback | `false` |
+| Duration | 2.098957 seconds |
+| Format | PCM signed 16-bit, stereo, 44.1 kHz |
+| Output size | 370,300 bytes |
+| Default pitch | Fixed MIDI note 64 |
 
-FFmpeg `volumedetect` confirmed that all 20 outputs were non-silent. Generated WAV, MIDI, LAB, and VOCALOID project data are excluded from Git and are not release assets.
+The 3.675011-second candidate is not a release artifact. At that stage, unit
+coverage enforced 5.5 to 7.5 sounding mora per second so the elongated timing
+could not silently return.
 
-## Lip sync
+Listener feedback then requested a further 1.2x to 1.3x increase. The shared
+default speech rate was raised from 100% to 125%. A fresh automatic VOCALOID6
+render of the same greeting completed without assisted fallback in 1.677075
+seconds (PCM signed 16-bit, stereo, 44.1 kHz, 295,880 bytes). Unit coverage now
+enforces 7.0 to 9.0 sounding mora per second at the default rate.
 
-Thirty short Japanese dialogues are covered by a deterministic unit test. Each sequence starts and ends with a closed mouth, contains at least one vowel mouth shape, and produces identical notes and mouth frames on repeated runs. The YMM4 adapter maps these frames to public `YukkuriMovieMaker.Commons.LipSyncFrame` values.
+## Current automated evidence
 
-## YMM4 plugin contract
+| Gate | Result |
+| --- | --- |
+| Unit tests | 33/33 passed |
+| Full Release build | Passed, 0 warnings, 0 errors |
+| Package boundary | Passed, 20/20 files allow-listed |
+| Installed YMM4 automatic render | Passed mechanically, no assisted fallback |
+| YMM4 restart/cache/lip sync | Passed, 15 frames restored |
+| Distinct Take outputs | 10/10 unique SHA-256 values |
+| Silent-output rejection | Passed in unit tests and real driver path |
+| Claude Sonnet beta.4 review | No high- or medium-severity actionable finding |
+| Gemini CLI | Blocked by `UNSUPPORTED_CLIENT`; not counted as passing |
 
-The Release plugin was loaded in-process with the official YMM4 4.54.0.1 assemblies. The contract smoke test passed for plugin discovery metadata, the single HATSUNE MIKU V6 speaker, voice parameter creation, Japanese reading conversion, native YMM4 lip-sync frames, and pronounce cloning. The package doctor also reported YMM4 4.54.0.1, VOCALOID6 6.12.0.1, and HATSUNE MIKU V6 6.12.0 as ready.
+The final listener verdict remains intentionally pending. Mechanical rendering
+and ASR evidence are not a substitute for the user's quality acceptance.
 
-This contract test does not open the downloaded YMM4 executable. Final confirmation that the voice appears in YMM4's in-app plugin list remains a first-launch verification step.
+## Compatibility boundary
 
-## Failure and recovery
-
-- An unavailable or renamed UI element raises `VocaloidAutomationException` with the failed stage information.
-- Automatic failure opens the assisted guide and waits for the same requested WAV path.
-- Stale Windows file dialogs are dismissed at the next automatic request.
-- The known optional VOCALOID6 update prompt is declined without changing update settings.
-- A named non-bridge track prevents automatic modification and triggers assisted fallback.
-- WAV files are accepted only after their size stabilizes and their RIFF/PCM structure is valid.
-
-## Remaining beta matrix
-
-The compatibility target above is verified at the machine's active display scaling. Additional YMM4/VOCALOID6 versions, UI languages, and DPI settings remain community test targets and must not be described as supported until evidence is added.
+Evidence applies only to the exact environment above at the machine's active
+display scaling. Other YMM4 or VOCALOID6 versions, UI languages, and DPI values
+remain community compatibility targets.

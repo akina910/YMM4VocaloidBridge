@@ -11,7 +11,7 @@ internal static class BridgeCli
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
+        if (args.Length > 0 && args[0] is "help" or "--help" or "-h")
         {
             PrintHelp();
             return 0;
@@ -19,6 +19,11 @@ internal static class BridgeCli
 
         try
         {
+            if (args.Length == 0)
+            {
+                return await RunInteractiveAsync().ConfigureAwait(false);
+            }
+
             var options = CliArguments.Parse(args.Skip(1));
             return args[0].ToLowerInvariant() switch
             {
@@ -26,14 +31,85 @@ internal static class BridgeCli
                 "inspect-ui" => RunInspectUi(options),
                 "inspect-tracks" => RunInspectTracks(),
                 "generate" => await RunGenerateAsync(options).ConfigureAwait(false),
-                "synthesize" => await RunSynthesizeAsync(options).ConfigureAwait(false),
+                "speak" => await RunSynthesizeAsync(
+                    options,
+                    automaticByDefault: true,
+                    allowFallbackByDefault: false).ConfigureAwait(false),
+                "synthesize" => await RunSynthesizeAsync(
+                    options,
+                    automaticByDefault: false,
+                    allowFallbackByDefault: true).ConfigureAwait(false),
                 _ => UnknownCommand(args[0]),
             };
         }
         catch (Exception exception)
         {
             Console.Error.WriteLine($"ERROR: {exception.Message}");
+            WriteDiagnosticLog(args, exception);
             return 1;
+        }
+    }
+
+    private static async Task<int> RunInteractiveAsync()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Console.WriteLine("Miku Robot Speech");
+        Console.Write("台詞> ");
+        var text = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            Console.Error.WriteLine("台詞が入力されていません。");
+            return 1;
+        }
+
+        var outputDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            outputDirectory = Environment.CurrentDirectory;
+        }
+
+        var outputPath = Path.Combine(
+            outputDirectory,
+            $"miku-robot-speech-{DateTime.Now:yyyyMMdd-HHmmss-fff}.wav");
+        var arguments = CliArguments.Parse([
+            "--text", text,
+            "--output", outputPath,
+        ]);
+        var result = await RunSynthesizeAsync(
+            arguments,
+            automaticByDefault: true,
+            allowFallbackByDefault: false).ConfigureAwait(false);
+        Console.WriteLine($"出力: {outputPath}");
+        Console.Write("Enterで閉じます。");
+        _ = Console.ReadLine();
+        return result;
+    }
+
+    private static void WriteDiagnosticLog(IReadOnlyList<string> arguments, Exception exception)
+    {
+        try
+        {
+            var directory = GetApplicationDataDirectory();
+            Directory.CreateDirectory(directory);
+            var entry = $"[{DateTimeOffset.Now:O}] command={string.Join(' ', RedactDialogue(arguments))}{Environment.NewLine}"
+                + exception
+                + Environment.NewLine;
+            File.AppendAllText(Path.Combine(directory, "cli-errors.log"), entry);
+        }
+        catch
+        {
+            // Diagnostics must not replace the original CLI failure.
+        }
+    }
+
+    private static IEnumerable<string> RedactDialogue(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            yield return index > 0
+                && string.Equals(arguments[index - 1], "--text", StringComparison.OrdinalIgnoreCase)
+                    ? "<redacted>"
+                    : arguments[index];
         }
     }
 
@@ -46,13 +122,11 @@ internal static class BridgeCli
             ? null
             : Path.Combine(Path.GetFullPath(ymm4Directory), "YukkuriMovieMaker.exe");
         var ymm4Ready = ymm4Executable is not null && File.Exists(ymm4Executable);
-        var appDataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "YMM4VocaloidBridge");
+        var appDataDirectory = GetApplicationDataDirectory();
         Directory.CreateDirectory(appDataDirectory);
 
         var result = new DoctorResult(
-            report.IsReady && ymm4Ready,
+            report.IsReady,
             Environment.OSVersion.VersionString,
             Environment.Version.ToString(),
             new Ymm4DoctorResult(
@@ -81,7 +155,7 @@ internal static class BridgeCli
         {
             Console.WriteLine(result.Ready ? "READY" : "NOT READY");
             Console.WriteLine($"[dotnet] {result.Dotnet}");
-            Console.WriteLine($"[ymm4] {(ymm4Ready ? "OK" : "MISSING")} {result.Ymm4.Version ?? string.Empty}");
+            Console.WriteLine($"[ymm4-optional] {(ymm4Ready ? "OK" : "NOT CONFIGURED")} {result.Ymm4.Version ?? string.Empty}");
             foreach (var diagnostic in report.Diagnostics)
             {
                 Console.WriteLine($"[{diagnostic.Code}] {(diagnostic.Success ? "OK" : "MISSING")} {diagnostic.Message}");
@@ -128,11 +202,14 @@ internal static class BridgeCli
         return 0;
     }
 
-    private static async Task<int> RunSynthesizeAsync(CliArguments arguments)
+    private static async Task<int> RunSynthesizeAsync(
+        CliArguments arguments,
+        bool automaticByDefault,
+        bool allowFallbackByDefault)
     {
         var text = arguments.GetRequired("text");
         var outputPath = Path.GetFullPath(arguments.GetRequired("output"));
-        var options = CreateOptions(arguments);
+        var options = CreateOptions(arguments, automaticByDefault);
         var installation = new VocaloidInstallationDetector().Detect();
         if (!installation.IsReady || installation.Installation is null)
         {
@@ -140,8 +217,7 @@ internal static class BridgeCli
         }
 
         var workDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "YMM4VocaloidBridge",
+            GetApplicationDataDirectory(),
             "cli-work",
             Guid.NewGuid().ToString("N"));
         var artifacts = await SynthesisArtifactBuilder.CreateDefault()
@@ -150,12 +226,9 @@ internal static class BridgeCli
         var waiter = new FileReadyWaiter(new WaveFileValidator());
         IVocaloidDriver assisted = new AssistedVocaloidDriver(waiter);
         var automatic = new Vocaloid6AutomationDriver(waiter);
-        IVocaloidDriver driver = options.DriverMode switch
-        {
-            VocaloidDriverMode.Automatic when arguments.HasFlag("no-fallback") => automatic,
-            VocaloidDriverMode.Automatic => new FallbackVocaloidDriver(automatic, assisted),
-            _ => assisted,
-        };
+        var allowFallback = !arguments.HasFlag("no-fallback")
+            && (allowFallbackByDefault || arguments.HasFlag("allow-fallback"));
+        var driver = VocaloidDriverFactory.Create(options.DriverMode, automatic, assisted, allowFallback);
         var result = await driver.RenderAsync(
             new VocaloidRenderRequest(artifacts, options, outputPath, installation.Installation))
             .ConfigureAwait(false);
@@ -166,22 +239,26 @@ internal static class BridgeCli
         return 0;
     }
 
-    private static BridgeOptions CreateOptions(CliArguments arguments)
+    private static BridgeOptions CreateOptions(CliArguments arguments, bool automaticByDefault = false)
     {
         var mode = arguments.GetOptional("mode")?.ToLowerInvariant() switch
         {
             "automatic" or "auto" => VocaloidDriverMode.Automatic,
-            null or "assisted" or "manual" => VocaloidDriverMode.Assisted,
+            "assisted" or "manual" => VocaloidDriverMode.Assisted,
+            null => automaticByDefault ? VocaloidDriverMode.Automatic : VocaloidDriverMode.Assisted,
             var value => throw new ArgumentException($"Unknown mode: {value}"),
         };
 
         return new BridgeOptions
         {
             DriverMode = mode,
-            TempoBpm = arguments.GetInt("tempo", 120),
-            BaseNote = arguments.GetInt("base-note", 60),
+            TempoBpm = arguments.GetInt("tempo", BridgeOptions.DefaultTempoBpm),
+            BaseNote = arguments.GetInt("base-note", BridgeOptions.DefaultBaseNote),
+            SpeechRatePercent = arguments.GetInt("rate", BridgeOptions.DefaultSpeechRatePercent),
             TimeoutSeconds = arguments.GetInt("timeout", 300),
             VoicebankName = arguments.GetOptional("voicebank") ?? BridgeOptions.DefaultVoicebankName,
+            VoiceStyleName = arguments.GetOptional("style") ?? BridgeOptions.DefaultVoiceStyleName,
+            VoiceTakeNumber = arguments.GetInt("take", BridgeOptions.DefaultVoiceTakeNumber),
         }.Validate();
     }
 
@@ -192,16 +269,28 @@ internal static class BridgeCli
         return 1;
     }
 
+    private static string GetApplicationDataDirectory()
+    {
+        var configured = Environment.GetEnvironmentVariable("YMM4_VOCALOID_BRIDGE_DATA_DIR");
+        return string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "YMM4VocaloidBridge")
+            : Path.GetFullPath(configured);
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
-            YMM4 Vocaloid Bridge CLI
+            Miku Robot Speech / YMM4 Vocaloid Bridge
 
-            doctor --ymm4-dir <directory> [--json|--ui]
+            Run without arguments for interactive robot-speech generation.
+            doctor [--ymm4-dir <directory>] [--json|--ui]
             inspect-ui [--depth 6] [--menu ファイル]
             inspect-tracks
-            generate --text <dialogue> --out-dir <directory> [--tempo 120] [--base-note 60]
-            synthesize --text <dialogue> --output <file.wav> [--mode assisted|automatic] [--no-fallback] [--timeout 300]
+            generate --text <dialogue> --out-dir <directory> [--rate 100] [--base-note 64]
+            speak --text <dialogue> --output <file.wav> [--rate 50-200] [--base-note 48-72] [--take 1-10]
+            synthesize --text <dialogue> --output <file.wav> [--mode assisted|automatic] [--take 1-10] [--no-fallback] [--timeout 300]
             """);
     }
 }

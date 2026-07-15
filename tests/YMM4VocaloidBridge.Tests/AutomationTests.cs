@@ -11,6 +11,36 @@ public sealed class AutomationTests : IDisposable
     private readonly string temporaryDirectory = Path.Combine(Path.GetTempPath(), "YMM4VocaloidBridgeAutomationTests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void Miku_selection_detector_matches_only_the_bridge_voice()
+    {
+        const string miku = """
+            {"CurrentCharacter":{"Name":"Miku","Voice":{"API":"YMM4VocaloidBridge.Vocaloid6","Arg":"HATSUNE_MIKU_V6"}}}
+            """;
+        const string reimu = """
+            {"CurrentCharacter":{"Name":"Reimu","Voice":{"API":"AquesTalk","Arg":"f1"}}}
+            """;
+
+        Assert.True(MikuSelectionDetector.IsSelected(miku));
+        Assert.False(MikuSelectionDetector.IsSelected(reimu));
+        Assert.False(MikuSelectionDetector.IsSelected("{}"));
+    }
+
+    [Fact]
+    public void Unlicensed_voice_prompt_requires_all_authorizer_markers()
+    {
+        const string prompt = """
+            下記のVoiceが認証されていません。
+            - NAOKI
+            VOCALOID Authorizer にて認証してください。
+            今すぐ認証しますか？
+            """;
+
+        Assert.True(VocaloidStartupPromptHandler.IsUnlicensedVoicePromptText(prompt));
+        Assert.False(VocaloidStartupPromptHandler.IsUnlicensedVoicePromptText("VOCALOID Authorizer を起動します。"));
+        Assert.False(VocaloidStartupPromptHandler.IsUnlicensedVoicePromptText("今すぐ認証しますか？"));
+    }
+
+    [Fact]
     public async Task File_waiter_accepts_a_wave_after_it_becomes_stable()
     {
         var path = Path.Combine(temporaryDirectory, "ready.wav");
@@ -60,6 +90,34 @@ public sealed class AutomationTests : IDisposable
         Assert.Equal("fake-assisted", result.DriverName);
         Assert.StartsWith("automatic-failed:", result.Events[0], StringComparison.Ordinal);
         Assert.Equal("test-failure", observedFailure?.Message);
+    }
+
+    [Fact]
+    public void Automatic_driver_does_not_fall_back_to_assisted_by_default()
+    {
+        var automatic = new FakeDriver((_, _) => throw new InvalidOperationException());
+        var assisted = new FakeDriver((_, _) => throw new InvalidOperationException());
+
+        var selected = VocaloidDriverFactory.Create(
+            VocaloidDriverMode.Automatic,
+            automatic,
+            assisted);
+
+        Assert.Same(automatic, selected);
+    }
+
+    [Fact]
+    public void Assisted_driver_is_used_only_when_selected_explicitly()
+    {
+        var automatic = new FakeDriver((_, _) => throw new InvalidOperationException());
+        var assisted = new FakeDriver((_, _) => throw new InvalidOperationException());
+
+        var selected = VocaloidDriverFactory.Create(
+            VocaloidDriverMode.Assisted,
+            automatic,
+            assisted);
+
+        Assert.Same(assisted, selected);
     }
 
     public void Dispose()

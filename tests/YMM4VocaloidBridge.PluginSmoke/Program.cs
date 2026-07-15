@@ -3,6 +3,8 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
 
+Environment.SetEnvironmentVariable("YMM4_VOCALOID_BRIDGE_DISABLE_AUTO_START", "1");
+
 if (args.Length != 2)
 {
     Console.Error.WriteLine("Usage: PluginSmoke <plugin-publish-directory> <YMM4-directory>");
@@ -47,12 +49,13 @@ var parameter = Invoke(speaker, "CreateVoiceParameter")
     ?? throw new InvalidOperationException("Voice parameter could not be created.");
 RequireEqual("MikuV6VoiceParameter", parameter.GetType().Name, "parameter type");
 RequireEqual("Automatic", GetProperty<object>(parameter, "DriverMode").ToString(), "default driver mode");
+RequireEqual(33, GetProperty<int>(parameter, "LipSyncLeadMilliseconds"), "default lip-sync lead");
 
 var readingTask = (Task)(Invoke(speaker, "ConvertKanjiToYomiAsync", "今日は初音ミクです。", parameter)
     ?? throw new InvalidOperationException("Reading task was not returned."));
 await readingTask.ConfigureAwait(false);
 var reading = readingTask.GetType().GetProperty("Result")?.GetValue(readingTask) as string;
-RequireEqual("キョーワハツネミクデス", reading, "Japanese reading");
+RequireEqual("キョーワハツネミクデス。", reading, "Japanese reading with punctuation");
 
 var coreAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(
     Path.Combine(pluginDirectory, "YMM4VocaloidBridge.Core.dll"));
