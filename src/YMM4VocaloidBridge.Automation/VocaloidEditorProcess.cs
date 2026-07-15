@@ -10,7 +10,7 @@ public sealed class VocaloidEditorWarmup
         var process = VocaloidEditorProcess.AttachOrLaunch(installation.EditorPath);
         _ = VocaloidStartupPromptHandler.WaitAndDismissUnlicensedVoicePrompt(
             process.Id,
-            TimeSpan.FromSeconds(30));
+            TimeSpan.FromSeconds(90));
         return started;
     }
 }
