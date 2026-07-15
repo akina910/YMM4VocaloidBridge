@@ -23,8 +23,15 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
 
     private static class NativeMethods
     {
+        public const uint ButtonClick = 0x00F5;
         public const uint LeftDown = 0x0002;
         public const uint LeftUp = 0x0004;
+
+        [Flags]
+        public enum SendMessageTimeoutFlags : uint
+        {
+            AbortIfHung = 0x0002,
+        }
 
         [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
         public struct Point
@@ -44,6 +51,20 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(
+            IntPtr windowHandle,
+            uint message,
+            IntPtr wordParameter,
+            IntPtr longParameter,
+            SendMessageTimeoutFlags flags,
+            uint timeoutMilliseconds,
+            out UIntPtr result);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        public static extern bool IsWindow(IntPtr windowHandle);
     }
 
     public async Task<VocaloidRenderResult> RenderAsync(
@@ -118,8 +139,7 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
             ?? "unknown";
         return new VocaloidAutomationException(
             $"VOCALOID6 UI automation failed at '{stage}' "
-                + $"({exception.GetType().Name}: {exception.Message}). "
-                + "Assisted mode can continue with the generated MIDI.",
+                + $"({exception.GetType().Name}: {exception.Message}).",
             exception);
     }
 
@@ -855,7 +875,60 @@ public sealed class Vocaloid6AutomationDriver(FileReadyWaiter fileWaiter) : IVoc
         }
 
         ((ValuePattern)valuePattern).SetValue(path);
-        InvokeButton(dialog, isSaveDialog ? ["保存", "Save"] : ["開く", "Open"]);
+        InvokeFileDialogAcceptButton(dialog, isSaveDialog);
+    }
+
+    private static void InvokeFileDialogAcceptButton(AutomationElement dialog, bool isSaveDialog)
+    {
+        var expectedNames = isSaveDialog ? new[] { "保存", "Save" } : new[] { "開く", "Open" };
+        var acceptCondition = new AndCondition(
+            new PropertyCondition(AutomationElement.AutomationIdProperty, "1"),
+            new PropertyCondition(AutomationElement.ClassNameProperty, "Button"));
+        var accept = dialog.FindFirst(TreeScope.Descendants, acceptCondition)
+            ?? throw new VocaloidAutomationException(
+                $"Expected file-dialog button was not found: {string.Join(" / ", expectedNames)}");
+        var acceptName = accept.Current.Name.TrimStart('_');
+        if (!expectedNames.Any(name =>
+                string.Equals(acceptName, name, StringComparison.OrdinalIgnoreCase)
+                || acceptName.StartsWith(name + "(", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new VocaloidAutomationException(
+                $"Unexpected file-dialog button: {acceptName}");
+        }
+
+        var dialogHandle = new IntPtr(dialog.Current.NativeWindowHandle);
+        var buttonHandle = new IntPtr(accept.Current.NativeWindowHandle);
+        if (dialogHandle == IntPtr.Zero || buttonHandle == IntPtr.Zero)
+        {
+            throw new VocaloidAutomationException("The file-dialog button does not have a native window handle.");
+        }
+
+        if (accept.TryGetCurrentPattern(InvokePattern.Pattern, out var invokePattern))
+        {
+            ((InvokePattern)invokePattern).Invoke();
+        }
+        else if (NativeMethods.SendMessageTimeout(
+            buttonHandle,
+            NativeMethods.ButtonClick,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            NativeMethods.SendMessageTimeoutFlags.AbortIfHung,
+            2_000,
+            out _) == IntPtr.Zero)
+        {
+            throw new VocaloidAutomationException("The file-dialog button did not accept the click message.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(5) && NativeMethods.IsWindow(dialogHandle))
+        {
+            Thread.Sleep(50);
+        }
+
+        if (NativeMethods.IsWindow(dialogHandle))
+        {
+            throw new VocaloidAutomationException("The file dialog remained open after its accept button was invoked.");
+        }
     }
 
     private static AutomationElement? FindTransientWindow(
